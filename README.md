@@ -1,0 +1,180 @@
+# 汐见萤Bot · 邦多利 Our Notes 查询插件
+
+AstrBot 插件：查询《BanG Dream! Our Notes》的**歌曲、卡牌、支援卡、贴纸、四格漫画**，并提供**图鉴总览**。
+界面参考 [bdon.moe](https://bdon.moe/) 的视觉风格（Material Design 3 浅色、卡片网格、乐队主题色），
+由 AstrBot t2i 渲染为图片返回。
+
+默认区服为 **cn**：与 tw / hk 同属繁中服，但游戏文本显示为**简体中文**；
+tw / hk / kr / en 前缀显示**繁体中文**，jp 数据只提供日文，因此显示日文。
+所有区服文本都来自同一份 MasterText，不需要额外下载。
+
+> 汐见萤Bot Designed by 慵懒午睡。MasterData 与游戏素材来自
+> [StarMoe-org/moenotes-masterdata](https://github.com/StarMoe-org/moenotes-masterdata)、
+> [StarMoe-org/moenotes](https://github.com/StarMoe-org/moenotes) 与 `assets.bdon.moe`，
+> 版权归原作者与游戏权利方所有。
+
+## 功能
+
+- **查歌**：曲绘、乐队、属性、作词/作曲/编曲、演唱角色、EZ/NM/HD/EX 难度、等级与物量。
+- **查卡**：卡面、角色、乐队、稀有度、属性、三围与综合力、队长/Live/激奏技能；列表右下角叠加 bdon.moe 的 R / SR / SSR / BD 稀有度图标，属性用彩色图标显示。
+- **查支援卡**：Snap 卡面、登场角色、稀有度、属性、三围、支援技能；同样带稀有度与属性图标。
+- **查贴纸**：单条结果直接发送贴纸原图（PNG）；多条结果展示贴纸列表。
+- **查漫画**：加载画面的四格漫画完整大图；单条结果直接发送原图。
+- **原图直发**：`card ID` / `scard ID` 直接返回卡面原图，`查贴纸 ID` / `查漫画 ID` 直接返回对应原图。
+- **查图鉴**：当前区服的收录总数、乐队分布、稀有度分布、最新歌曲/卡牌/贴纸/漫画。
+- **多区服**：繁中服（`cn` 简体 / `tw`、`hk` 繁体）、日服（`jp`）、韩服（`kr`）、国际服（`en`）。
+- **无需斜杠**：默认监听不带 `/` 的消息，命中指令后自动阻止事件继续传给 LLM。
+- **一图展示**：列表一次展示全部条目，不分页；1080px 画布、加大卡面与字号，聊天窗口缩放后仍可阅读。
+- **ID 标注**：列表卡片左下角显示 `#ID`，可直接用于 `card` / `scard` 或对应查询指令。
+- **搜索兼容**：关键词支持简体、繁体、日文、英文、韩文，或直接输入数字 ID。
+- **自动同步**：启动时与每日定时检查全部 4 个区服，版本未变化时只读清单、不重复下载。
+
+## 指令
+
+指令格式：`[区服前缀]指令 [关键词 / ID]`
+
+| 指令 | 说明 | 示例 |
+| --- | --- | --- |
+| `查歌` | 查询歌曲 | `查歌 迷星叫`、`jp查歌 1` |
+| `查卡` | 查询成员卡牌 | `查卡 高松灯`、`查卡 SSR` |
+| `查支援卡` | 查询支援卡 | `查支援卡 好想成为人类` |
+| `card ID` | 直接返回成员卡面原图 | `card 64`、`jp card 64` |
+| `scard ID` | 直接返回支援卡原图 | `scard 12`、`kr scard 12` |
+| `查贴纸` | 查询贴纸；单条结果直接发送原图 | `查贴纸 灯的表情1` |
+| `查漫画` | 查询四格漫画；单条结果直接发送原图 | `查漫画 高松灯`、`查漫画 12` |
+| `查图鉴` | 资料库总览；可接分类直接看列表 | `查图鉴`、`查图鉴 歌曲` |
+| `邦多利帮助` | 查看指令帮助（也可用 `邦邦帮助`、`bdon帮助`） | `邦多利帮助` |
+| `同步数据` | 管理员手动同步全部区服 MasterData | `同步数据` |
+
+区服前缀：
+
+| 区服 | 前缀 | 文本 |
+| --- | --- | --- |
+| 繁中服（TW / HK / MO） | 空、`cn`（默认） | 简体中文 |
+| 繁中服（TW / HK / MO） | `tw`、`hk` | 繁体中文 |
+| 日服 | `jp` | 日文 |
+| 韩服 | `kr` | 繁体中文 |
+| 国际服 | `en` | 繁体中文 |
+
+搜索规则：
+
+- 关键词支持简体 / 繁体 / 日文 / 英文 / 韩文，或直接输入数字 ID。
+- 多个关键词用空格分隔，会同时匹配标题、角色、乐队等字段。
+- 单条结果直接展示详情；多条结果展示卡片列表。
+- 界面显示的 `#ID` 是游戏内短编号（歌曲 1、2、3…，卡牌与支援卡用 MasterData ID，贴纸、漫画从 1 起），真实 ID 仍然可以查询。
+- 列表卡片左下角的 `#ID` 可直接用于 `card ID`、`scard ID` 或 `查漫画 ID`。
+- 支持角色别名：`灯`、`tomori`、`tmr`、`ana`、`rana`、`soyo` 等社区常用写法都能搜到对应角色，别名库在 `res/character_aliases.json` 中维护。
+- 支持模糊搜索：罗马音可不带长音符号（`rana` 等于 `rāna`），拼写差一两个字符也能命中。
+- 角色名的模糊匹配是保守的：只有在没有另一个已知词更接近查询时才生效，因此 `tomori` 不会连带返回 `Timoris` / `Mortis`，`saki` 也不会连带返回 `Taki`。多词查询（如 `Ave Mujica`）会逐词匹配后再组合。
+- 列表一次展示全部结果，不使用分页；长图可直接放大查看或保存。
+
+## 安装
+
+1. 将整个 `astrbot_plugin_bdon` 目录放入 AstrBot 的插件目录（通常是 `data/plugins/`）。
+2. 在 AstrBot WebUI 的「插件」页重载插件。
+3. 确认 `requirements.txt` 中的依赖已安装（AstrBot 通常已自带 `aiohttp`、`Jinja2`；`Pillow` 用于把 webp 卡面转成 PNG，未安装时会直接发送 webp）。
+4. 确认 AstrBot 主配置中的 `t2i_endpoint` 指向可用的生图服务；插件默认调用 AstrBot 自带的 `html_render`。
+5. 发送 `邦多利帮助` 验证插件是否正常工作。
+
+首次启动会自动并行同步 4 个区服（合计约 16 MB），之后任意区服首次查询都不需要等待下载。
+
+## 配置
+
+配置文件由 AstrBot 根据 `_conf_schema.json` 生成。
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `auto_sync` | `true` | 启用每日自动同步全部区服 |
+| `sync_hour` | `4` | 每日同步小时（本地时区，固定在第 30 分钟执行） |
+| `render_endpoint` | 空 | 可选：直连 t2i 回退地址；留空则只使用 AstrBot 自带生图 |
+| `render_timeout` | `120` | 单张图片渲染超时（秒） |
+| `image_timeout` | `60` | 卡面/漫画原图下载超时（秒） |
+| `sync_timeout` | `60` | 单个数据表下载超时（秒） |
+| `asset_base` | `https://assets.bdon.moe` | 游戏素材站点 |
+| `data_source_bases` | jsDelivr 镜像列表 | MasterData 下载源，按顺序尝试 |
+
+## 数据同步
+
+- 数据仓库：`StarMoe-org/moenotes-masterdata`，按区服分目录：
+  - 繁中服：`hk-tw-mo/`
+  - 日服：`jp/`
+  - 韩服：`kr/`
+  - 国际服：`en/`
+- **启动时**：总是检查全部 4 个区服（并行）。先读取 `current_version.json` 与本地记录的版本比对，
+  版本一致且必需表齐全时直接跳过，不下载任何文件。因此即使管理员只查询默认区服，jp / kr / en 也会
+  保持最新。远程版本文件取不到但本地有完整数据时，同样保留现有数据，避免镜像抖动导致每次重启都重新下载。
+- **每日定时**：`auto_sync` 开启时，在配置的小时自动检查全部区服。
+- **按需补全**：如果某个区服的数据缺失（例如首次查询时启动同步尚未完成），会在查询前自动同步该区服。
+- 管理员发送 `同步数据` 会强制刷新全部区服（并行执行）。
+- 插件只下载查询所需的 16 张表（文本、歌曲、谱面、卡牌、支援卡、贴纸、漫画、角色、乐队、技能等），
+  不下载完整的 243 张表。
+- 下载源默认使用 jsDelivr（`cdn` / `gcore` / `fastly`），最后回退到 GitHub Raw；可在配置中替换为自建镜像。
+- 文件写入使用临时文件 + 原子替换，避免半写入的 JSON 被读取。
+
+## 渲染
+
+- 页面由 Jinja2 模板生成完整 HTML，再交给 AstrBot 自带的 `Star.html_render()` 生图。
+- `html_render` 使用 AstrBot 主配置中的 `t2i_endpoint`，插件不再默认直连渲染服务；只有配置了 `render_endpoint` 且内置接口失败时才走直连回退。
+- 所有页面使用固定画布，不再按内容自动缩宽：歌曲 / 卡牌为 5 列（卡面约 197px），支援卡 / 漫画为 4 列（卡面约 250px），搜索结果较少时自动减少列数并居中排列，避免末行只剩一张卡时右侧出现大片空白。
+- 列表页与详情页统一 1080px 画布、`normal` 输出；贴纸列表保持原有的 900px、7 列紧凑布局。详情页左栏固定 420px，右栏填满剩余宽度，技能区按三列等高排列，不再出现左右错位或面板内部的大块留白。
+- 列表页输出高质量 JPEG，详情页、图鉴与帮助输出 PNG，兼顾聊天发送体积与文字清晰度。
+- 部分 t2i 服务对超高页面与特定缩放级别会返回 500，插件会按 `ultra → high → normal` 的顺序自动降级重试。
+- 列表页输出高质量 JPEG，详情页与图鉴输出 PNG，兼顾聊天发送体积与文字清晰度。
+- 封面统一为正方形；支援卡原图是 16:9，为免裁掉画面改用原始宽高比。`viewport_height` 只作为初始视口，`full_page` 仍会扩展到内容真实高度，因此短页面底部不会出现空白背景带。
+- 页面内嵌 MiSans 字体子集（约 1.1 MB base64），由 `tests/build_font.py` 从 `res/font.ttf` 生成；内网传输下每次渲染仅增加约 0.3 秒。数据出现新字符时可重新运行该脚本。
+- `card` / `scard` / `查漫画` 的原图会下载到 `data/plugin_data/astrbot_plugin_bdon/images/` 并缓存（最多 300 个、7 天）。素材服务只提供 webp，插件会用 Pillow 转换为 PNG 以兼容更多适配器，转换成功后删除原始 webp；未安装 Pillow 时退回 webp。
+- 直连回退生成的图片保存在 `data/plugin_data/astrbot_plugin_bdon/renders/`；内置接口由 AstrBot 管理临时文件。
+- 素材图片直接引用 `assets.bdon.moe`，并在浏览器端对缺失图片做降级（隐藏或切换简体副本）。
+- 因此 **渲染服务所在机器需要能访问 `assets.bdon.moe`**；若素材加载失败，页面仍会显示文字与占位背景。
+
+## 目录结构
+
+```
+astrbot_plugin_bdon/
+├── main.py                     # AstrBot 插件入口、指令路由、渲染上下文
+├── metadata.yaml
+├── _conf_schema.json
+├── requirements.txt
+├── res/
+│   ├── character_aliases.json  # 角色别名库（搜索用，可自行增补）
+│   ├── font.ttf                # MiSans 源字体
+│   ├── misans-subset.b64.txt   # 内嵌到页面用的字体子集（base64）
+│   └── icons/                  # 稀有度 / 属性图标（内嵌为 data URI）
+├── bdon/
+│   ├── constants.py            # 区服、简繁切换、属性、稀有度、指令别名、数据表清单
+│   ├── assets.py               # 素材 URL 构造（区服 + 语言 + 路径）
+│   ├── models.py               # MasterData → 视图模型、图鉴统计
+│   ├── masterdata.py           # 下载、版本检查、双脚本缓存、每日同步
+│   ├── icons.py                # 稀有度 / 属性图标 → data URI
+│   ├── aliases.py              # 读取 res/character_aliases.json
+│   ├── search.py               # 关键词、别名、模糊匹配
+│   ├── render.py               # Jinja2 + AstrBot html_render（可选直连回退）
+│   └── templates/              # base + 各页面模板
+└── tests/
+    ├── test_plugin.py          # 无 AstrBot 环境的指令解析与路由测试
+    ├── render_samples.py       # 渲染所有页面到 tests/output
+    └── build_font.py           # 从 res/font.ttf 重建字体子集
+```
+
+## 测试
+
+```bash
+# 指令解析、插件加载、查询路由（不需要 AstrBot）
+python tests/test_plugin.py
+
+# 下载数据并渲染所有页面到 tests/output/
+python tests/render_samples.py tw
+python tests/render_samples.py jp
+
+# masterdata 出现新字符后，重建内嵌字体子集
+python tests/build_font.py
+```
+
+`render_samples.py` 会把图片输出到 `tests/output/`，可直接查看排版效果。
+
+## 已知说明
+
+- 繁中服素材优先使用 `zh-Hant`，缺失时浏览器会尝试 `zh-Hans`。
+- 文本字段按区服脚本选择：cn 使用「简体中文 → 繁体中文 → 日文 → 英文 → 韩文」回退；tw / hk / kr / en 使用「繁体中文 → 简体中文 → 日文 → 英文 → 韩文」回退。日服 MasterText 绝大多数行只有日文，因此会自然回退到日文。搜索始终覆盖全部语言字段。
+- 技能描述中的游戏内数值占位符（如 `{effects[0].value}`）会显示为 `…`，因为数值需要运行时结算，MasterData 中没有固定值。
+- 部分卡牌/贴纸素材可能尚未导出，页面会自动隐藏缺失图片并保留文字信息。

@@ -1,0 +1,78 @@
+{# Shared image and chip helpers. #}
+{% macro img(src, fb='', alt='', cls='') -%}
+<img class="{{ cls }}" src="{{ src }}" alt="{{ alt }}" loading="eager"
+     {%- if fb %} data-fb="{{ fb }}" onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.removeAttribute('data-fb')}else{this.style.display='none'}"{% else %} onerror="this.style.display='none'"{% endif %}>
+{%- endmacro %}
+
+{% macro picture(src, fb='', alt='', cls='', fallback='♪') -%}
+<div class="pic {{ cls }}">
+  <div class="pic-fallback"><span>{{ fallback }}</span></div>
+  {{ img(src, fb, alt, 'pic-img') }}
+</div>
+{%- endmacro %}
+
+{% macro attr_chip(label, color, icon='', show_text=true) -%}
+{% if label %}<span class="chip attr-chip" style="--attr:{{ color }}" title="{{ label }}">{% if icon %}<img class="attr-icon" src="{{ icon }}" alt="{{ label }}" loading="eager" onerror="this.style.display='none'">{% else %}<i class="dot"></i>{% endif %}{% if show_text or not icon %}{{ label }}{% endif %}</span>{% endif %}
+{%- endmacro %}
+
+{% macro rarity_badge(label, color) -%}
+<span class="rarity" style="--rarity:{{ color }}">{{ label }}</span>
+{%- endmacro %}
+
+{# Neon rarity mark bdon.moe overlays on the thumbnail's lower-right corner. #}
+{% macro rarity_mark(icon, alt='') -%}
+{% if icon %}<img class="rarity-mark" src="{{ icon }}" alt="{{ alt }}" loading="eager" onerror="this.style.display='none'">{% endif %}
+{%- endmacro %}
+
+{% macro band_pill(name, color) -%}
+{% if name %}<span class="chip band-chip" style="--band:{{ color }}"><i class="dot"></i>{{ name }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro char_face(character) -%}
+<span class="char-chip" title="{{ character.name }}">
+  {{ img(character.face_url, character.face_fallback, character.name, 'char-face') }}
+  <span>{{ character.short_name or character.name }}</span>
+</span>
+{%- endmacro %}
+
+{% macro difficulty_cards(difficulties) -%}
+<div class="diff-grid">
+  {% for diff in difficulties %}
+  <div class="diff-card" style="--diff:{{ diff.color }}">
+    <div class="diff-top"><span class="diff-label">{{ diff.label }}</span><span class="diff-notes">{{ diff.notes }} notes</span></div>
+    <div class="diff-level">{{ diff.display_level }}</div>
+    <div class="diff-track"><span style="width:{{ (diff.level / 30 * 100) | round(0) }}%"></span></div>
+  </div>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro power_row(label, value, max_value, color) -%}
+<div class="power-row">
+  <span class="power-label">{{ label }}</span>
+  <span class="bar"><span style="width:{{ (value / max_value * 100) | round(1) }}%;background:{{ color }}"></span></span>
+  <span class="power-value">{{ value | num }}</span>
+</div>
+{%- endmacro %}
+
+{% macro section_title(title, sub='') -%}
+<div class="section-head">
+  <span class="section-bar"></span>
+  <h2 class="section-title">{{ title }}</h2>
+  {% if sub %}<span class="section-sub">{{ sub }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro empty_state(title, text, suggestions=[]) -%}
+<div class="empty">
+  <div class="empty-icon">✦</div>
+  <div class="empty-title">{{ title }}</div>
+  <div class="empty-text">{{ text }}</div>
+  {% if suggestions %}
+  <div class="empty-suggest">
+    <span>你是不是想找：</span>
+    {% for item in suggestions %}<span class="suggest-chip">{{ item.title_for_search }}</span>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}

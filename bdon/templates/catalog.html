@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% from "_macros.html" import section_title %}
+{% block content %}
+<div class="catalog-hero">
+  <div class="catalog-kicker">OUR NOTES · 资料图鉴</div>
+  <div class="catalog-title">{{ region.label }} 资料图鉴</div>
+  <div class="catalog-desc">收录歌曲、卡牌、支援卡、贴纸与四格漫画的完整索引。发送 <b>查歌</b>、<b>查卡</b> 等指令即可搜索；<b>card #ID</b>、<b>scard #ID</b> 可直接查看卡面原图。</div>
+  <div class="catalog-meta">
+    <span>角色 <b>{{ stats.counts.characters }}</b></span>
+    <span>乐队 <b>{{ stats.counts.bands }}</b></span>
+    <span>收录内容 <b>{{ stats.counts.songs + stats.counts.cards + stats.counts.supports + stats.counts.stamps + stats.counts.comics }}</b> 项</span>
+  </div>
+</div>
+
+<div class="catalog-grid">
+  <div class="catalog-tile">
+    <div class="icon" style="color:#4C9DF0">♪</div>
+    <div class="count">{{ stats.counts.songs }}</div>
+    <div class="label">歌曲</div>
+    <div class="cmd">{{ region_prefix }}查歌</div>
+  </div>
+  <div class="catalog-tile">
+    <div class="icon" style="color:#B86BD8">▣</div>
+    <div class="count">{{ stats.counts.cards }}</div>
+    <div class="label">卡牌</div>
+    <div class="cmd">{{ region_prefix }}查卡</div>
+  </div>
+  <div class="catalog-tile">
+    <div class="icon" style="color:#3DBFA0">◈</div>
+    <div class="count">{{ stats.counts.supports }}</div>
+    <div class="label">支援卡</div>
+    <div class="cmd">{{ region_prefix }}查支援卡</div>
+  </div>
+  <div class="catalog-tile">
+    <div class="icon" style="color:#D9A441">✧</div>
+    <div class="count">{{ stats.counts.stamps }}</div>
+    <div class="label">贴纸</div>
+    <div class="cmd">{{ region_prefix }}查贴纸</div>
+  </div>
+  <div class="catalog-tile">
+    <div class="icon" style="color:#FF8899">▤</div>
+    <div class="count">{{ stats.counts.comics }}</div>
+    <div class="label">四格漫画</div>
+    <div class="cmd">{{ region_prefix }}查漫画</div>
+  </div>
+</div>
+
+{{ section_title('乐队收录', '按乐队') }}
+<div class="band-table">
+  <div class="band-row band-head">
+    <div>乐队</div>
+    <div>收录占比</div>
+    <div>歌曲</div>
+    <div>卡牌</div>
+    <div>支援卡</div>
+  </div>
+  {% for band in stats.bands %}
+  <div class="band-row">
+    <div class="band-name"><i class="dot" style="background:{{ band.color }}"></i><span>{{ band.name }}</span></div>
+    <div class="band-bar"><span style="width:{{ band.song_ratio }}%;background:{{ band.color }}"></span></div>
+    <div class="band-num"><b>{{ band.songs }}</b> 曲</div>
+    <div class="band-num"><b>{{ band.cards }}</b> 张</div>
+    <div class="band-num"><b>{{ band.supports }}</b> 张</div>
+  </div>
+  {% endfor %}
+</div>
+
+{{ section_title('稀有度分布', '成员 · 支援') }}
+<div class="rarity-row">
+  {% for rarity in stats.member_rarities %}
+  <div class="rarity-card" style="--rarity:{{ rarity.color }}">
+    <div class="label">成员 · {{ rarity.label }}</div>
+    <div class="count">{{ rarity.count }}</div>
+  </div>
+  {% endfor %}
+</div>
+<div class="rarity-row" style="margin-top:10px">
+  {% for rarity in stats.support_rarities %}
+  <div class="rarity-card" style="--rarity:{{ rarity.color }}">
+    <div class="label">支援 · {{ rarity.label }}</div>
+    <div class="count">{{ rarity.count }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+{{ section_title('最新收录', '歌曲 · 卡牌') }}
+<div class="latest-grid">
+  <div class="latest-card">
+    <div class="latest-row latest-head">
+      <div class="latest-main">最新歌曲</div>
+      <div class="latest-date">{{ region_prefix }}查歌</div>
+    </div>
+    {% for song in stats.latest_songs %}
+    <div class="latest-row">
+      <div class="latest-thumb"><img src="{{ song.jacket_url }}" alt="" loading="eager" onerror="this.style.display='none'"></div>
+      <div class="latest-main">
+        <div class="latest-title">{{ song.title }}</div>
+        <div class="latest-sub">{{ song.band_name or '—' }}</div>
+      </div>
+      <div class="latest-date">{{ song.start_at }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="latest-card">
+    <div class="latest-row latest-head">
+      <div class="latest-main">最新卡牌</div>
+      <div class="latest-date">{{ region_prefix }}查卡</div>
+    </div>
+    {% for card in stats.latest_cards %}
+    <div class="latest-row">
+      <div class="latest-thumb"><img src="{{ card.thumb_url }}" alt="" loading="eager" onerror="this.style.display='none'"></div>
+      <div class="latest-main">
+        <div class="latest-title">{{ card.title }}</div>
+        <div class="latest-sub">{{ card.character_name }} · {{ card.rarity_label }}</div>
+      </div>
+      <div class="latest-date">{{ card.start_at }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{{ section_title('最新贴纸与漫画', '贴纸 · 漫画') }}
+<div class="latest-grid">
+  <div class="latest-card">
+    <div class="latest-row latest-head">
+      <div class="latest-main">最新贴纸</div>
+      <div class="latest-date">{{ region_prefix }}查贴纸</div>
+    </div>
+    {% for stamp in stats.latest_stamps %}
+    <div class="latest-row">
+      <div class="latest-thumb"><img src="{{ stamp.image_url }}" alt="" loading="eager" onerror="this.style.display='none'"></div>
+      <div class="latest-main">
+        <div class="latest-title">{{ stamp.name }}</div>
+        <div class="latest-sub">{{ stamp.characters | map(attribute='name') | join('、') or stamp.band_name or '—' }}</div>
+      </div>
+      <div class="latest-date">{{ stamp.start_at }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="latest-card">
+    <div class="latest-row latest-head">
+      <div class="latest-main">最新漫画</div>
+      <div class="latest-date">{{ region_prefix }}查漫画</div>
+    </div>
+    {% for comic in stats.latest_comics %}
+    <div class="latest-row">
+      <div class="latest-thumb tall"><img src="{{ comic.image_url }}" alt="" loading="eager" onerror="this.style.display='none'"></div>
+      <div class="latest-main">
+        <div class="latest-title">{{ comic.name }}</div>
+        <div class="latest-sub">{{ comic.characters | map(attribute='name') | join('、') or comic.band_name or '—' }}</div>
+      </div>
+      <div class="latest-date">{{ comic.start_at }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

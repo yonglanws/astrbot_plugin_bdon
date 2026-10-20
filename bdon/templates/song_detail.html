@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, attr_chip, band_pill, char_face, difficulty_cards %}
+{% block content %}
+<div class="detail-grid">
+  <div class="detail-media">
+    <div class="art-card square">
+      <div class="art-badge">
+        {{ attr_chip(song.type_label, song.type_color, song.type_icon) }}
+        {% if song.is_new %}<span class="new-badge">NEW</span>{% endif %}
+      </div>
+      {{ picture(song.jacket_url, song.jacket_fallback, song.title, '', '♪') }}
+      <div class="art-caption">{{ song.band_name or 'Our Notes' }}</div>
+    </div>
+    {% if song.vocalists %}
+    <div class="side-panel">
+      <div class="side-title">演唱角色</div>
+      <div class="char-row">
+        {% for character in song.vocalists %}{{ char_face(character) }}{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="info-panel">
+    <div class="kicker">歌曲</div>
+    <h1 class="title">{{ song.title }}</h1>
+    {% if song.title_ja and song.title_ja != song.title %}<div class="title-ja">{{ song.title_ja }}</div>{% endif %}
+    <div class="meta-row">
+      <span class="chip mono id-chip">#{{ song.display_id }}</span>
+      {{ band_pill(song.band_name, song.band_color) }}
+      {{ attr_chip(song.type_label, song.type_color, song.type_icon) }}
+      {% for category in song.categories %}<span class="chip">{{ category }}</span>{% endfor %}
+      {% for tag in song.tags %}<span class="chip">{{ tag }}</span>{% endfor %}
+      <span class="chip">发布于 {{ song.start_at or '—' }}</span>
+    </div>
+
+    <div class="divider"></div>
+    {{ difficulty_cards(song.difficulties) }}
+
+    <div class="divider"></div>
+    <div class="meta-list">
+      <div class="meta-item"><div class="meta-label">作曲</div><div class="meta-value">{{ song.composer or '—' }}</div></div>
+      <div class="meta-item"><div class="meta-label">作词</div><div class="meta-value">{{ song.lyricist or '—' }}</div></div>
+      <div class="meta-item"><div class="meta-label">编曲</div><div class="meta-value">{{ song.arranger or '—' }}</div></div>
+      <div class="meta-item"><div class="meta-label">实装日期</div><div class="meta-value">{{ song.start_at or '—' }}</div></div>
+    </div>
+
+    <div class="summary-strip push-bottom">
+      <div class="summary-item">
+        <div class="summary-label">最高难度</div>
+        <div class="summary-value">{{ (song.difficulties | map(attribute='level') | max) if song.difficulties else '—' }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">总物量</div>
+        <div class="summary-value">{{ song.difficulties | sum(attribute='notes') | num }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">收录谱面</div>
+        <div class="summary-value">{{ song.difficulties | length }}<small>个难度</small></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

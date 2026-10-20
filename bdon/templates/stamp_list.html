@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, empty_state %}
+{% block content %}
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">游戏贴纸</div>
+    <h1 class="page-title">{% if resolved.query %}搜索「{{ resolved.query }}」{% else %}全部贴纸{% endif %}</h1>
+    <div class="page-sub">{% if resolved.query %}按匹配度排序{% else %}按贴纸 ID 排列{% endif %}</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ resolved.total }}</b><span>张贴纸</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}查贴纸 #ID</b> 直接发送原图</div>
+  </div>
+</header>
+
+{% if resolved.items %}
+<div class="stamp-grid">
+  {% for stamp in resolved.items %}
+  <div class="item-card">
+    <div class="item-cover square">
+      <span class="id-tag">#{{ stamp.display_id }}</span>
+      {{ picture(stamp.image_url, stamp.image_fallback, stamp.name, '', '✦') }}
+    </div>
+    <div class="item-body">
+      <div class="item-title">{{ stamp.name }}</div>
+      <div class="item-sub">{{ stamp.characters | map(attribute='name') | join('、') or stamp.band_name or '—' }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+{{ empty_state('没有找到这张贴纸', '试试贴纸名、角色名或贴纸 ID。', resolved.suggestions) }}
+{% endif %}
+{% endblock %}

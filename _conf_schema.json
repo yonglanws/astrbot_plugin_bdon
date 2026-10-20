@@ -1,0 +1,58 @@
+{
+  "auto_sync": {
+    "description": "每日自动同步所有区服",
+    "type": "bool",
+    "default": true,
+    "hint": "启动时也会检查一次；版本未变化时只读取清单，不会重复下载。"
+  },
+  "sync_hour": {
+    "description": "每日同步时间（小时）",
+    "type": "int",
+    "default": 4,
+    "slider": { "min": 0, "max": 23, "step": 1 },
+    "hint": "固定在第 30 分钟执行，同步繁中服、日服、韩服、国际服。"
+  },
+  "render_endpoint": {
+    "description": "可选：直连 t2i 回退地址",
+    "type": "string",
+    "default": "",
+    "hint": "默认使用 AstrBot 自带的 html_render（读取 AstrBot 配置中的 t2i_endpoint）。只有内置接口失败时才使用这里填写的地址；可填 http://127.0.0.1:8999 或 http://127.0.0.1:8999/text2img，留空表示不回退。"
+  },
+  "render_timeout": {
+    "description": "单张图片渲染超时（秒）",
+    "type": "int",
+    "default": 120,
+    "slider": { "min": 20, "max": 300, "step": 5 }
+  },
+  "image_timeout": {
+    "description": "卡面/贴纸/漫画原图下载超时（秒）",
+    "type": "int",
+    "default": 120,
+    "slider": { "min": 10, "max": 300, "step": 5 },
+    "hint": "card / scard、查贴纸、查漫画的单条结果会直接发送游戏原图，首次发送时下载并缓存为 PNG。"
+  },
+  "sync_timeout": {
+    "description": "单个数据表下载超时（秒）",
+    "type": "int",
+    "default": 60,
+    "slider": { "min": 10, "max": 300, "step": 5 }
+  },
+  "asset_base": {
+    "description": "游戏素材站点",
+    "type": "string",
+    "default": "https://assets.bdon.moe",
+    "hint": "Our Notes 素材服务，按区服自动拼接语言与路径。"
+  },
+  "data_source_bases": {
+    "description": "MasterData 下载源（按顺序尝试）",
+    "type": "list",
+    "default": [
+      "https://cdn.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
+      "https://gcore.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
+      "https://fastly.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
+      "https://raw.githubusercontent.com/StarMoe-org/moenotes-masterdata/main"
+    ],
+    "items": { "type": "string" },
+    "hint": "默认使用 jsDelivr 镜像；可替换为自己搭建的镜像或本地 HTTP 服务。"
+  }
+}

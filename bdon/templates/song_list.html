@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, attr_chip, empty_state %}
+{% block content %}
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">歌曲索引</div>
+    <h1 class="page-title">{% if resolved.query %}搜索「{{ resolved.query }}」{% else %}全部歌曲{% endif %}</h1>
+    <div class="page-sub">{% if resolved.query %}按匹配度排序{% else %}按游戏收录顺序排列{% endif %}</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ resolved.total }}</b><span>首歌曲</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}查歌 #ID</b> 查看详情与谱面</div>
+  </div>
+</header>
+
+{% if resolved.items %}
+<div class="list-grid" style="--card-w:216px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
+  {% for song in resolved.items %}
+  <div class="item-card">
+    <div class="item-cover square">
+      <div class="corner-badge">{{ attr_chip(song.type_label, song.type_color, song.type_icon, false) }}</div>
+      {% if song.is_new %}<div class="corner-badge right"><span class="new-badge">NEW</span></div>{% endif %}
+      <span class="id-tag">#{{ song.display_id }}</span>
+      {{ picture(song.jacket_url, song.jacket_fallback, song.title, '', '♪') }}
+    </div>
+    <div class="item-body">
+      <div class="item-title">{{ song.title }}</div>
+      <div class="item-sub">{{ song.band_name or '—' }}{% if song.composer %} · {{ song.composer }}{% endif %}</div>
+      <div class="item-foot diffs">
+        {% for diff in song.difficulties %}
+        <span class="mini-diff" style="--diff:{{ diff.color }}">{{ diff.label }} <b>{{ diff.display_level }}</b></span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+{{ empty_state('没有找到这首歌', '试试歌曲名、角色名、乐队名或歌曲 ID。', resolved.suggestions) }}
+{% endif %}
+{% endblock %}

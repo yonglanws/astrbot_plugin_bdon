@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, attr_chip, rarity_mark, empty_state %}
+{% block content %}
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">成员卡牌</div>
+    <h1 class="page-title">{% if resolved.query %}搜索「{{ resolved.query }}」{% else %}全部卡牌{% endif %}</h1>
+    <div class="page-sub">{% if resolved.query %}按匹配度排序{% else %}按稀有度与实装顺序{% endif %}</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ resolved.total }}</b><span>张卡牌</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}card #ID</b> 原图 · <b>{{ region_prefix }}查卡 #ID</b> 详情</div>
+  </div>
+</header>
+
+{% if resolved.items %}
+<div class="list-grid" style="--card-w:216px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
+  {% for card in resolved.items %}
+  <div class="item-card">
+    <div class="item-cover square">
+      <div class="corner-badge">{{ attr_chip(card.type_label, card.type_color, card.type_icon, false) }}</div>
+      {% if card.is_new %}<div class="corner-badge right"><span class="new-badge">NEW</span></div>{% endif %}
+      <span class="id-tag">#{{ card.display_id }}</span>
+      {{ rarity_mark(card.rarity_icon, card.rarity_label) }}
+      {{ picture(card.thumb_url, card.thumb_fallback, card.title, '', card.character_name[:1] or '✦') }}
+    </div>
+    <div class="item-body">
+      <div class="item-title">{{ card.title }}</div>
+      <div class="item-sub">{{ card.character_name }}{% if card.band_name %} · {{ card.band_name }}{% endif %}</div>
+      <div class="item-foot">
+        <span class="chip power-chip">综合 <b>{{ card.total_power | num }}</b></span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+{{ empty_state('没有找到这张卡', '试试卡牌名、角色名、乐队名、稀有度或卡牌 ID。', resolved.suggestions) }}
+{% endif %}
+{% endblock %}

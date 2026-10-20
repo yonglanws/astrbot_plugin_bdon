@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "_macros.html" import img, picture, attr_chip, band_pill, rarity_badge, rarity_mark, power_row, section_title %}
+{% set max_power = ([support.performance, support.technic, support.visual] | max) or 1 %}
+{% block content %}
+<div class="detail-grid">
+  <div class="detail-media">
+    <div class="art-card wide">
+      <div class="art-badge">
+        {% if support.is_new %}<span class="new-badge">NEW</span>{% endif %}
+      </div>
+      <div class="art-badge right">{{ attr_chip(support.type_label, support.type_color, support.type_icon) }}</div>
+      {{ rarity_mark(support.rarity_icon, support.rarity_label) }}
+      {{ picture(support.art_url, support.art_fallback, support.title, '', '✦') }}
+      <div class="art-caption">{{ support.name }}</div>
+    </div>
+    {% if support.characters %}
+    <div class="side-panel">
+      <div class="side-title">登场角色</div>
+      <div class="char-row">
+        {% for character in support.characters %}
+        <span class="char-chip">
+          {{ img(character.face_url, character.face_fallback, character.name, 'char-face') }}
+          <span>{{ character.name }}</span>
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="info-panel">
+    <div class="kicker">支援卡</div>
+    <h1 class="title">{{ support.title }}</h1>
+    {% if support.name and support.name != support.band_name %}<div class="subtitle">{{ support.name }}</div>{% endif %}
+    <div class="meta-row">
+      <span class="chip mono id-chip">#{{ support.display_id }}</span>
+      {{ band_pill(support.band_name, support.band_color) }}
+      {{ rarity_badge(support.rarity_label, support.rarity_color) }}
+      {{ attr_chip(support.type_label, support.type_color, support.type_icon) }}
+      <span class="chip">发布于 {{ support.start_at or '—' }}</span>
+    </div>
+
+    <div class="divider"></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">综合力</div><div class="stat-value">{{ support.total_power | num }}</div></div>
+      <div class="stat"><div class="stat-label">稀有度</div><div class="stat-value">{{ support.rarity_label }}</div></div>
+      <div class="stat"><div class="stat-label">属性</div><div class="stat-value" style="color:{{ support.type_color }}">{{ support.type_label }}</div></div>
+    </div>
+
+    <div class="divider"></div>
+    {{ power_row('表演', support.performance, max_power, support.type_color) }}
+    {{ power_row('技巧', support.technic, max_power, support.type_color) }}
+    {{ power_row('视觉', support.visual, max_power, support.type_color) }}
+  </div>
+</div>
+
+{% if support.skills %}
+{{ section_title('支援技能', '演出 · LIFE') }}
+<div class="skill-grid">
+  {% for skill in support.skills %}
+  <div class="skill-card">
+    <div class="skill-label">{{ skill.label }}</div>
+    <div class="skill-name">{{ skill.name }}</div>
+    {% if skill.description %}<div class="skill-desc">{{ skill.description }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

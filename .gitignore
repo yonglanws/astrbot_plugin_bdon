@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+data/
+tests/.data/
+tests/output/
+.venv/
+.DS_Store
+Thumbs.db
+# Intermediate subset font. res/misans-subset.b64.txt is what the renderer reads
+# and must be committed; rebuild both with tests/build_font.py.
+res/misans-subset.ttf
