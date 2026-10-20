@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_macros.html" import img, empty_state %}
+{% block content %}
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">活动索引</div>
+    <h1 class="page-title">{% if resolved.query %}搜索「{{ resolved.query }}」{% else %}活动一览{% endif %}</h1>
+    <div class="page-sub">{% if resolved.query %}按匹配度排序{% else %}按开放时间倒序排列{% endif %}</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ resolved.total }}</b><span>个活动</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}查活动</b> 当前活动 · <b>{{ region_prefix }}查活动 #ID</b> 详情</div>
+  </div>
+</header>
+
+{% if resolved.items %}
+<div class="event-grid">
+  {% for event in resolved.items %}
+  <article class="event-card {{ event.status_class }}">
+    <div class="event-cover">
+      {{ img(event.banner_url, event.banner_fallback, event.name, 'event-cover-img') }}
+      <div class="event-cover-shade"></div>
+      <span class="state-pill status-pill">{{ event.status_label }}</span>
+      <span class="event-id">#{{ event.id }}</span>
+    </div>
+    <div class="event-body">
+      <div class="event-name" title="{{ event.name }}">{{ event.name }}</div>
+      <div class="event-period">{{ event.period_label }}</div>
+      <div class="event-chips">
+        <span class="chip">{{ event.type_label }}</span>
+        {% if event.status != 'ended' %}<span class="chip">{{ event.days_label }}</span>{% endif %}
+        {% if event.item_name %}<span class="chip">{{ event.item_name }}</span>{% endif %}
+      </div>
+      {% if event.song %}<div class="event-songline">♪ {{ event.song.title }}{% if event.song.band_name %} · {{ event.song.band_name }}{% endif %}</div>{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+{{ empty_state('暂无活动', '还没有收录活动数据，请先同步 MasterData。') }}
+{% endif %}
+{% endblock %}

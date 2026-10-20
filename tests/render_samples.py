@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bdon.constants import (  # noqa: E402
+    BROWSE_KINDS,
+    BROWSE_LIMIT,
     DEFAULT_ASSET_BASE,
     DEFAULT_DATA_SOURCES,
     DETAIL_WIDTH,
@@ -43,6 +45,7 @@ KIND_ACCENTS = {
     "support": "#3DBFA0",
     "stamp": "#D9A441",
     "comic": "#FF8899",
+    "event": "#E05A7A",
     "catalog": "#0072C2",
     "help": "#4C9DF0",
 }
@@ -164,8 +167,24 @@ async def main(region: str) -> None:
         width: int = LIST_WIDTH,
     ):
         context["page_width"] = width
-        context["resolved"] = resolve(items, context.pop("query", ""), page_size=LIST_PAGE_SIZE, kind=kind)
+        query = context.pop("query", "")
+        browse = None
+        if not query and kind in BROWSE_KINDS and len(items) > BROWSE_LIMIT:
+            ordered = sorted(
+                items,
+                key=lambda item: (item.start_dt or datetime.min, item.id),
+                reverse=True,
+            )
+            browse = {
+                "shown": BROWSE_LIMIT,
+                "total": len(items),
+                "limit": BROWSE_LIMIT,
+            }
+            items = ordered[:BROWSE_LIMIT]
+        context["resolved"] = resolve(items, query, page_size=LIST_PAGE_SIZE, kind=kind)
         context["columns"] = list_columns(kind, len(context["resolved"].items))
+        if browse is not None:
+            context["browse"] = browse
         return await render(
             name,
             template,
@@ -254,6 +273,33 @@ async def main(region: str) -> None:
     ctx = base_context(manager, region, "查图鉴", KIND_ACCENTS["catalog"])
     ctx["stats"] = catalog_stats(dataset)
     await render("catalog", "catalog.html", ctx, image_type="jpeg", scale=LIST_SCALE)
+
+    # Events: current event detail and the full list.
+    current = next(
+        (event for event in dataset.events if event.status == "ongoing"),
+        dataset.events[0] if dataset.events else None,
+    )
+    if current is not None:
+        ctx = base_context(
+            manager, region, "查活动 · 活动详情", KIND_ACCENTS["event"]
+        )
+        ctx["event"] = current
+        ctx["item"] = current
+        await render("event_detail", "event_detail.html", ctx)
+
+        ctx = base_context(manager, region, "活动一览", KIND_ACCENTS["event"])
+        ctx["resolved"] = resolve(
+            dataset.events, "", page_size=LIST_PAGE_SIZE, kind="event"
+        )
+        ctx["columns"] = list_columns("event", len(dataset.events))
+        await render(
+            "event_list",
+            "event_list.html",
+            ctx,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            scale=LIST_SCALE,
+        )
 
     # Help
     ctx = base_context(manager, region, "帮助", KIND_ACCENTS["help"])

@@ -7,6 +7,7 @@ import hashlib
 import re
 import time
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -28,6 +29,8 @@ from astrbot.api.star import Context, Star
 
 from .bdon.constants import (
     ART_COMMANDS,
+    BROWSE_KINDS,
+    BROWSE_LIMIT,
     COMMAND_ALIASES,
     DEFAULT_ASSET_BASE,
     DEFAULT_DATA_SOURCES,
@@ -50,7 +53,7 @@ from .bdon.constants import (
 from .bdon.masterdata import MasterDataManager
 from .bdon.models import catalog_stats
 from .bdon.render import AstrBotRenderService, PageRenderer, RenderError, RenderService
-from .bdon.search import resolve
+from .bdon.search import Resolved, resolve
 
 
 KIND_ACCENTS = {
@@ -59,6 +62,8 @@ KIND_ACCENTS = {
     "support": "#3DBFA0",
     "stamp": "#D9A441",
     "comic": "#FF8899",
+    "event": "#E05A7A",
+    "event_list": "#E05A7A",
     "catalog": "#0072C2",
     "help": "#4C9DF0",
 }
@@ -76,6 +81,8 @@ CATALOG_SUBKINDS = {
     "表情": "stamp",
     "漫画": "comic",
     "漫畫": "comic",
+    "活动": "event",
+    "活動": "event",
 }
 
 
@@ -290,9 +297,17 @@ class BdonPlugin(Star):
             return
 
         try:
-            if kind == "catalog":
+            if kind == "event_list":
+                path = await self._render_event_list(
+                    region, script, region_prefix, dataset
+                )
+            elif kind == "catalog":
                 subkind = CATALOG_SUBKINDS.get(args)
-                if subkind:
+                if subkind == "event":
+                    path = await self._render_event_list(
+                        region, script, region_prefix, dataset, "图鉴"
+                    )
+                elif subkind:
                     path = await self._render_query(
                         region, script, region_prefix, dataset, subkind, ""
                     )
@@ -590,6 +605,79 @@ class BdonPlugin(Star):
             scale=LIST_SCALE,
         )
 
+    async def _render_event_list(
+        self,
+        region: str,
+        script: str,
+        region_prefix: str,
+        dataset: Any,
+        command_label: str = "活动一览",
+    ) -> str | Path:
+        items = dataset.items_for("event")
+        resolved = Resolved(mode="list", items=list(items), total=len(items))
+        return await self._render_event_listing(
+            region, script, region_prefix, resolved, command_label
+        )
+
+    async def _render_event_listing(
+        self,
+        region: str,
+        script: str,
+        region_prefix: str,
+        resolved: Resolved,
+        command_label: str,
+    ) -> str | Path:
+        context = self._base_context(
+            region,
+            script,
+            region_prefix,
+            command_label,
+            KIND_ACCENTS["event"],
+            page_width=LIST_WIDTH,
+        )
+        context["resolved"] = resolved
+        context["kind"] = "event"
+        context["columns"] = list_columns("event", len(resolved.items))
+        return await self.renderer.render(
+            "event_list.html",
+            context,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            quality=LIST_JPEG_QUALITY,
+            scale=LIST_SCALE,
+        )
+
+    @staticmethod
+    def _resolve_event(events: list[Any], args: str) -> Resolved:
+        """Empty query shows what is running now, else the nearest event."""
+        query = (args or "").strip()
+        if query:
+            return resolve(events, query, page_size=LIST_PAGE_SIZE, kind="event")
+
+        current = [event for event in events if event.status == "ongoing"]
+        if current:
+            if len(current) == 1:
+                return Resolved(
+                    mode="detail", item=current[0], total=1, exact=True
+                )
+            return Resolved(mode="list", items=current, total=len(current))
+
+        upcoming = sorted(
+            (event for event in events if event.status == "upcoming" and event.start_dt),
+            key=lambda event: event.start_dt,
+        )
+        if upcoming:
+            return Resolved(mode="detail", item=upcoming[0], total=1, exact=True)
+
+        ended = sorted(
+            (event for event in events if event.start_dt),
+            key=lambda event: event.start_dt,
+            reverse=True,
+        )
+        if ended:
+            return Resolved(mode="detail", item=ended[0], total=1, exact=True)
+        return Resolved(mode="list", total=0)
+
     async def _render_query(
         self,
         region: str,
@@ -600,8 +688,32 @@ class BdonPlugin(Star):
         args: str,
     ) -> str | Path:
         items = dataset.items_for(kind)
-        resolved = resolve(items, args, page_size=LIST_PAGE_SIZE, kind=kind)
         command_label = KIND_COMMANDS[kind]
+        browse: dict[str, int] | None = None
+
+        if kind == "event":
+            resolved = self._resolve_event(items, args)
+        else:
+            if (
+                not (args or "").strip()
+                and kind in BROWSE_KINDS
+                and len(items) > BROWSE_LIMIT
+            ):
+                ordered = sorted(
+                    items,
+                    key=lambda item: (
+                        getattr(item, "start_dt", None) or datetime.min,
+                        item.id,
+                    ),
+                    reverse=True,
+                )
+                browse = {
+                    "shown": BROWSE_LIMIT,
+                    "total": len(items),
+                    "limit": BROWSE_LIMIT,
+                }
+                items = ordered[:BROWSE_LIMIT]
+            resolved = resolve(items, args, page_size=LIST_PAGE_SIZE, kind=kind)
 
         if resolved.mode == "detail" and resolved.item is not None:
             item = resolved.item
@@ -635,6 +747,15 @@ class BdonPlugin(Star):
                 scale=LIST_SCALE,
             )
 
+        if kind == "event":
+            return await self._render_event_listing(
+                region,
+                script,
+                region_prefix,
+                resolved,
+                command_label + (f" · {resolved.query}" if resolved.query else ""),
+            )
+
         # The sticker grid keeps its original denser canvas; every other list
         # shares the wider canvas so cards line up at a readable size.
         width = STAMP_LIST_WIDTH if kind == "stamp" else LIST_WIDTH
@@ -649,6 +770,8 @@ class BdonPlugin(Star):
         context["resolved"] = resolved
         context["kind"] = kind
         context["columns"] = list_columns(kind, len(resolved.items))
+        if browse is not None:
+            context["browse"] = browse
         # Long card grids compress well as high-quality JPEG while keeping text
         # crisp; detail pages stay PNG.
         return await self.renderer.render(

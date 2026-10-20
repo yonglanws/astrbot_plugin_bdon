@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, img, section_title %}
+{% block content %}
+<div class="event-hero {{ event.status_class }}">
+  {% if event.background_url %}{{ img(event.background_url, event.background_fallback, event.name, 'hero-bg') }}{% endif %}
+  <div class="event-state">
+    <span class="state-pill status-pill">{{ event.status_label }}</span>
+    {% if event.status != 'ended' %}<span class="state-pill soft">{{ event.days_label }}</span>{% endif %}
+  </div>
+  <div class="event-hero-inner">
+    {% if event.logo_url %}{{ img(event.logo_url, event.logo_fallback, event.name, 'event-logo') }}{% endif %}
+    <h1 class="event-title">{{ event.name }}</h1>
+    <div class="event-meta">
+      <span class="chip">活动 #{{ event.id }}</span>
+      <span class="chip">{{ event.type_label }}</span>
+      <span class="chip">{{ event.period_label }}</span>
+      {% if event.item_name %}<span class="chip">{{ event.item_name }}</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="event-info">
+  <div class="info-box">
+    <div class="info-label">活动期间</div>
+    <div class="info-value">{{ event.start_at }} – {{ event.end_at }}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">页面展示至</div>
+    <div class="info-value">{{ event.display_end_at or '—' }}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">活动道具</div>
+    <div class="info-value">{% if event.item_icon %}{{ img(event.item_icon, '', event.item_name, 'info-icon') }}{% endif %}{{ event.item_name or '—' }}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">活动歌曲</div>
+    <div class="info-value">{{ event.song.title if event.song else '—' }}</div>
+  </div>
+</div>
+
+{% if event.song %}
+{{ section_title('活动歌曲', event.song.band_name or '') }}
+<div class="event-song">
+  {{ picture(event.song.jacket_url, event.song.jacket_fallback, event.song.title, '', '♪') }}
+  <div class="song-main">
+    <div class="song-title">{{ event.song.title }}</div>
+    <div class="song-sub">{{ event.song.band_name }}{% if event.song.type_label %} · {{ event.song.type_label }}{% endif %}{% if event.song.composer %} · {{ event.song.composer }}{% endif %}</div>
+    <div class="song-diffs">
+      {% for diff in event.song.difficulties %}
+      <span class="mini-diff" style="--diff:{{ diff.color }}">{{ diff.label }} <b>{{ diff.display_level }}</b></span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="song-side">#{{ event.song.display_id }}{% if event.song.categories %}<br>{{ event.song.categories | join(' · ') }}{% endif %}</div>
+</div>
+{% endif %}
+
+{% if event.member_bonuses or event.support_bonuses %}
+{{ section_title('活动加成', 'Rank 1 → 满破') }}
+<div class="bonus-grid">
+  <div class="bonus-panel">
+    <div class="bonus-head"><b>成员卡加成</b><span>{{ event.member_bonuses | length }} 张</span></div>
+    {% for bonus in event.member_bonuses %}
+    <div class="bonus-row">
+      <div class="bonus-thumb">{% if bonus.image_url %}{{ img(bonus.image_url, bonus.image_fallback, bonus.name, '') }}{% else %}★{% endif %}</div>
+      <div class="bonus-main">
+        <div class="bonus-name" title="{{ bonus.name }}">{{ bonus.name }}</div>
+        <div class="bonus-sub">{{ bonus.sub }}</div>
+      </div>
+      <div class="bonus-rate">{{ bonus.rate_label }}</div>
+    </div>
+    {% else %}
+    <div class="bonus-row"><div class="bonus-sub">暂无成员卡加成</div></div>
+    {% endfor %}
+  </div>
+  <div class="bonus-panel">
+    <div class="bonus-head"><b>支援卡加成</b><span>{{ event.support_bonuses | length }} 张</span></div>
+    {% for bonus in event.support_bonuses %}
+    <div class="bonus-row">
+      <div class="bonus-thumb">{% if bonus.image_url %}{{ img(bonus.image_url, bonus.image_fallback, bonus.name, '') }}{% else %}★{% endif %}</div>
+      <div class="bonus-main">
+        <div class="bonus-name" title="{{ bonus.name }}">{{ bonus.name }}</div>
+        <div class="bonus-sub">{{ bonus.sub }}</div>
+      </div>
+      <div class="bonus-rate">{{ bonus.rate_label }}</div>
+    </div>
+    {% else %}
+    <div class="bonus-row"><div class="bonus-sub">暂无支援卡加成</div></div>
+    {% endfor %}
+  </div>
+</div>
+{% if event.rule_bonuses %}
+<div class="rule-row">
+  {% for bonus in event.rule_bonuses %}
+  <span class="rule-chip">
+    {% if bonus.icon %}<img class="attr-icon" src="{{ bonus.icon }}" alt="{{ bonus.name }}">{% endif %}
+    <b>{{ bonus.name }}</b><span class="rate">{{ bonus.rate_label }}</span>
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% if event.story_text %}
+{{ section_title('活动剧情', event.story_name) }}
+<div class="story-card">
+  {% if event.story_name %}<div class="story-name">{{ event.story_name }}</div>{% endif %}
+  {{ event.story_text }}
+</div>
+{% endif %}
+
+{% if event.point_rewards %}
+{{ section_title('点数奖励', event.point_rewards | length ~ ' 个里程碑') }}
+<div class="reward-grid">
+  {% for reward in event.point_rewards %}
+  <div class="reward-row" title="{{ reward.labels | join('、') }}">
+    {% if reward.icons %}{{ img(reward.icons[0], '', '', 'reward-icon') }}{% else %}<span class="reward-icon"></span>{% endif %}
+    <span class="reward-pt">{{ reward.point_label }}</span>
+    <span class="reward-text">{{ reward.labels | join('、') }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% if event.loop_label %}<div class="reward-note">{{ event.loop_label }}</div>{% endif %}
+{% endif %}
+
+{% if event.live_rewards or event.challenge_rewards %}
+{{ section_title('演出报酬', '按评价结算') }}
+<div class="perf-grid">
+  {% if event.live_rewards %}
+  <div class="perf-card">
+    <div class="perf-title">普通 Live</div>
+    <div class="perf-row perf-head"><span>评价</span><span>活动 pt</span><span>奖励</span></div>
+    {% for row in event.live_rewards %}
+    <div class="perf-row">
+      <span class="perf-rank">{{ row.label }}</span>
+      <span class="perf-pt">{{ row.points }}</span>
+      <span class="perf-item">{{ row.item_name }} ×{{ row.item_count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if event.challenge_rewards %}
+  <div class="perf-card">
+    <div class="perf-title">挑战 Live</div>
+    <div class="perf-row perf-head"><span>评价</span><span>活动 pt</span><span>奖励</span></div>
+    {% for row in event.challenge_rewards %}
+    <div class="perf-row">
+      <span class="perf-rank">{{ row.label }}</span>
+      <span class="perf-pt">{{ row.points }}</span>
+      <span class="perf-item">{{ row.item_name }} ×{{ row.item_count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

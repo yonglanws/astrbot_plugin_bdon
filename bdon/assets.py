@@ -15,9 +15,18 @@ from .constants import RegionProfile
 
 
 class AssetBuilder:
-    def __init__(self, base: str, region: RegionProfile) -> None:
+    def __init__(
+        self, base: str, region: RegionProfile, script: str = "simplified"
+    ) -> None:
         self.base = base.rstrip("/")
         self.region = region
+        # The TW catalog publishes both Chinese scripts; pick the one that
+        # matches the command text so a Simplified query does not return
+        # Traditional artwork (sticker images carry visible Chinese text).
+        if region.key == "tw":
+            self.language = "zh-Hans" if script == "simplified" else "zh-Hant"
+        else:
+            self.language = region.asset_language
 
     def url(self, path: str, label: str | None = None) -> str:
         key = path.strip().lstrip("/")
@@ -32,16 +41,17 @@ class AssetBuilder:
             label = f"{key.split('/')[-1]}.webp"
         segments = [
             self.region.asset_prefix,
-            self.region.asset_language,
+            self.language,
             *key.split("/"),
             label,
         ]
         return self.base + "/" + "/".join(quote(part, safe="") for part in segments if part)
 
     def alternate(self, path: str, label: str | None = None) -> str:
-        """The Simplified Chinese copy, used as a browser-side fallback on TW."""
+        """The other Chinese script, used as a browser-side fallback on TW."""
         if self.region.key != "tw":
             return ""
+        alternate = "zh-Hant" if self.language == "zh-Hans" else "zh-Hans"
         key = path.strip().lstrip("/")
         if key.lower().endswith(".png"):
             key = key[:-4]
@@ -51,7 +61,7 @@ class AssetBuilder:
             return ""
         if label is None:
             label = f"{key.split('/')[-1]}.webp"
-        segments = ["zh-Hans", *key.split("/"), label]
+        segments = [alternate, *key.split("/"), label]
         return self.base + "/" + "/".join(quote(part, safe="") for part in segments if part)
 
     def pair(self, path: str, label: str | None = None) -> tuple[str, str]:
@@ -78,6 +88,18 @@ class AssetBuilder:
 
     def comic(self, asset_name: str) -> tuple[str, str]:
         return self.pair(f"Image/Comic/{asset_name}.png")
+
+    def event_logo(self, asset_path: str) -> tuple[str, str]:
+        return self.pair(f"Image/Event/{asset_path}.png") if asset_path else ("", "")
+
+    def event_background(self, asset_path: str) -> tuple[str, str]:
+        return self.pair(f"Image/Event/{asset_path}.png") if asset_path else ("", "")
+
+    def event_banner(self, asset_path: str) -> tuple[str, str]:
+        return self.pair(f"Image/Event/{asset_path}.png") if asset_path else ("", "")
+
+    def item(self, image_path: str) -> tuple[str, str]:
+        return self.pair(f"{image_path}.png") if image_path else ("", "")
 
     def character_face(self, character_id: int) -> tuple[str, str]:
         return self.pair(f"Character/Image/{character_id}/character_face_icon.png")

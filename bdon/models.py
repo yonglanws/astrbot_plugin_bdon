@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -12,10 +13,12 @@ from .assets import AssetBuilder
 from .constants import (
     ATTRIBUTES,
     DIFFICULTIES,
+    EVENT_TYPES,
     MEMBER_RARITIES,
     MUSIC_CATEGORY_FALLBACK,
-    SCRIPT_TEXT_FIELDS,
     RegionProfile,
+    SCORE_GRADES,
+    SCRIPT_TEXT_FIELDS,
     SUPPORT_RARITIES,
 )
 from .icons import attribute_icon, rarity_icon
@@ -79,6 +82,12 @@ def format_level(value: Any) -> str:
     except (TypeError, ValueError):
         return str(value or "-")
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def _percent(value: float) -> str:
+    """Formats a bonus rate without trailing zeros: 30.0 -> "30"."""
+    rounded = round(float(value), 1)
+    return str(int(rounded)) if rounded.is_integer() else f"{rounded:.1f}"
 
 
 @dataclass
@@ -303,6 +312,136 @@ class Comic:
 
 
 @dataclass
+class EventBonus:
+    """One row of the event bonus table: a card, band or attribute."""
+
+    kind: str  # "member" | "support" | "band" | "attribute"
+    name: str
+    sub: str
+    values: list[float]
+    color: str = "#0072C2"
+    icon: str = ""
+    image_url: str = ""
+    image_fallback: str = ""
+    detail_id: int = 0
+
+    @property
+    def rate_label(self) -> str:
+        """Rank 1 and max-awakening rates, e.g. ``+30% → +50%``."""
+        if not self.values:
+            return ""
+        return f"+{_percent(self.values[0])}% → +{_percent(self.values[-1])}%"
+
+
+@dataclass
+class EventReward:
+    """One cumulative point milestone."""
+
+    point: int
+    labels: list[str]
+    icons: list[str]
+
+    @property
+    def point_label(self) -> str:
+        return f"{self.point:,} pt"
+
+
+@dataclass
+class EventGradeReward:
+    """One D–SS row of the live / challenge performance table."""
+
+    label: str
+    points: int
+    item_name: str
+    item_count: int
+
+
+@dataclass
+class Event:
+    id: int
+    name: str
+    event_type: int
+    type_label: str
+    start_at: str
+    end_at: str
+    display_end_at: str
+    start_dt: datetime | None
+    end_dt: datetime | None
+    display_end_dt: datetime | None
+    logo_url: str
+    logo_fallback: str
+    background_url: str
+    background_fallback: str
+    banner_url: str
+    banner_fallback: str
+    item_name: str
+    item_icon: str
+    song: Song | None
+    story_name: str
+    story_text: str
+    member_bonuses: list[EventBonus]
+    support_bonuses: list[EventBonus]
+    rule_bonuses: list[EventBonus]
+    point_rewards: list[EventReward]
+    loop_label: str
+    live_rewards: list[EventGradeReward]
+    challenge_rewards: list[EventGradeReward]
+    search_text: str = ""
+
+    @property
+    def title_for_search(self) -> str:
+        return self.name
+
+    @property
+    def display_id(self) -> int:
+        return self.id
+
+    @property
+    def period_label(self) -> str:
+        if self.start_at and self.end_at:
+            return f"{self.start_at} – {self.end_at}"
+        return self.start_at or self.end_at or "—"
+
+    @property
+    def status(self) -> str:
+        now = datetime.now()
+        if self.start_dt and now < self.start_dt:
+            return "upcoming"
+        if self.end_dt and now > self.end_dt:
+            return "ended"
+        if self.start_dt and self.end_dt:
+            return "ongoing"
+        return "unknown"
+
+    @property
+    def status_label(self) -> str:
+        return {
+            "ongoing": "进行中",
+            "upcoming": "即将开始",
+            "ended": "已结束",
+        }.get(self.status, "活动")
+
+    @property
+    def status_class(self) -> str:
+        return {
+            "ongoing": "event-live",
+            "upcoming": "event-soon",
+            "ended": "event-over",
+        }.get(self.status, "event-over")
+
+    @property
+    def days_label(self) -> str:
+        now = datetime.now()
+        if self.status == "ongoing" and self.end_dt:
+            days = max(0, math.ceil((self.end_dt - now).total_seconds() / 86400))
+            return "最后一天" if days == 0 else f"剩余 {days} 天"
+        if self.status == "upcoming" and self.start_dt:
+            days = max(1, math.ceil((self.start_dt - now).total_seconds() / 86400))
+            return f"{days} 天后开始"
+        return "活动已结束"
+
+
+@dataclass
 class Dataset:
     region: RegionProfile
     songs: list[Song]
@@ -310,6 +449,7 @@ class Dataset:
     supports: list[SupportCard]
     stamps: list[Stamp]
     comics: list[Comic]
+    events: list[Event]
     bands: dict[int, Band]
     characters: dict[int, Character]
     script: str = "simplified"
@@ -321,6 +461,7 @@ class Dataset:
             "support": self.supports,
             "stamp": self.stamps,
             "comic": self.comics,
+            "event": self.events,
         }[kind]
 
 
@@ -334,7 +475,7 @@ class DatasetBuilder:
         self.region = region
         self.script = script if script in SCRIPT_TEXT_FIELDS else "simplified"
         self.text_fields = SCRIPT_TEXT_FIELDS[self.script]
-        self.assets = AssetBuilder(asset_base, region)
+        self.assets = AssetBuilder(asset_base, region, self.script)
 
     def build(self, tables: dict[str, Any]) -> Dataset:
         text_rows = rows(tables.get("MasterText"))
@@ -380,6 +521,23 @@ class DatasetBuilder:
         )
         stamps = self._build_stamps(rows(tables.get("MasterStamp")))
         comics = self._build_comics(rows(tables.get("MasterLoadingComics")))
+        events = self._build_events(
+            rows(tables.get("MasterEvent")),
+            rows(tables.get("MasterEventEffect")),
+            rows(tables.get("MasterEventAchievementReward")),
+            rows(tables.get("MasterEventAchievementLoopReward")),
+            rows(tables.get("MasterReward")),
+            rows(tables.get("MasterItem")),
+            rows(tables.get("MasterStoryChapter")),
+            rows(tables.get("MasterLiveEventPoint")),
+            rows(tables.get("MasterLiveEventReward")),
+            rows(tables.get("MasterChallengeLiveEventPoint")),
+            rows(tables.get("MasterChallengeLiveEventReward")),
+            songs,
+            cards,
+            supports,
+            stamps,
+        )
 
         return Dataset(
             region=self.region,
@@ -388,6 +546,7 @@ class DatasetBuilder:
             supports=supports,
             stamps=stamps,
             comics=comics,
+            events=events,
             bands=self.bands,
             characters=self.characters,
             script=self.script,
@@ -915,6 +1074,386 @@ class DatasetBuilder:
                 )
             )
         result.sort(key=lambda comic: (comic.order, comic.id))
+        return result
+
+    # -- events ----------------------------------------------------------------
+    def _build_events(
+        self,
+        data: Iterable[dict[str, Any]],
+        effects: Iterable[dict[str, Any]],
+        achievements: Iterable[dict[str, Any]],
+        loop_rewards: Iterable[dict[str, Any]],
+        reward_table: Iterable[dict[str, Any]],
+        item_rows: Iterable[dict[str, Any]],
+        story_rows: Iterable[dict[str, Any]],
+        live_points: Iterable[dict[str, Any]],
+        live_rewards: Iterable[dict[str, Any]],
+        challenge_points: Iterable[dict[str, Any]],
+        challenge_rewards: Iterable[dict[str, Any]],
+        songs: list[Song],
+        cards: list[Card],
+        supports: list[SupportCard],
+        stamps: list[Stamp],
+    ) -> list[Event]:
+        item_by_id = {
+            int(row.get("_id") or 0): row
+            for row in item_rows
+            if row.get("_id") is not None
+        }
+        reward_by_id = {
+            int(row.get("_id") or 0): row
+            for row in reward_table
+            if row.get("_id") is not None
+        }
+        story_by_id = {
+            int(row.get("_id") or 0): row
+            for row in story_rows
+            if row.get("_id") is not None
+        }
+        song_by_id = {song.id: song for song in songs}
+        card_by_id = {card.id: card for card in cards}
+        support_by_id = {card.id: card for card in supports}
+        stamp_by_id = {stamp.id: stamp for stamp in stamps}
+
+        effects_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in effects:
+            effects_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+        achievements_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in achievements:
+            achievements_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+        loops_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in loop_rewards:
+            loops_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+
+        def reward_info(reward: dict[str, Any]) -> tuple[str, str, int]:
+            """Resolves one MasterReward row into a display label and icon."""
+            resource_type = int(reward.get("_resourceType") or 0)
+            resource_id = int(reward.get("_resourceId") or 0)
+            count = int(reward.get("_resourceCount") or 0)
+            name = ""
+            icon = ""
+            if resource_type == 1:
+                item = item_by_id.get(resource_id)
+                if item:
+                    name = self.text(str(item.get("_nameTextId") or ""))
+                    image_path = str(item.get("_imagePath") or "")
+                    if image_path:
+                        icon = self.assets.item(image_path)[0]
+            elif resource_type == 2:
+                card = card_by_id.get(resource_id)
+                if card:
+                    name = (
+                        f"{card.character_name} · {card.title}"
+                        if card.character_name
+                        else card.title
+                    )
+                    icon = card.thumb_url
+            elif resource_type == 3:
+                card = support_by_id.get(resource_id)
+                if card:
+                    people = "、".join(
+                        character.name for character in card.characters[:2]
+                    )
+                    name = f"{people} · {card.title}" if people else card.title
+                    icon = card.thumb_url
+            elif resource_type == 9:
+                stamp = stamp_by_id.get(resource_id)
+                if stamp:
+                    name = stamp.name
+                    icon = stamp.image_url
+            if not name:
+                name = f"奖励 #{resource_id}" if resource_id else "奖励"
+            return name, icon, count
+
+        def reward_text(reward: dict[str, Any]) -> str:
+            name, _, count = reward_info(reward)
+            return f"{name} ×{count}" if count > 1 else name
+
+        def grade_rows(
+            point_rows: Iterable[dict[str, Any]],
+            reward_rows: Iterable[dict[str, Any]],
+            group: int,
+            reward_group: int,
+        ) -> list[EventGradeReward]:
+            points = {
+                int(row.get("_scoreRank") or 0): int(row.get("_value") or 0)
+                for row in point_rows
+                if int(row.get("_group") or 0) == group
+            }
+            rewards: dict[int, tuple[str, int]] = {}
+            for row in reward_rows:
+                if int(row.get("_eventGroup") or 0) != reward_group:
+                    continue
+                rank = int(row.get("_scoreRank") or 0)
+                name, _, count = reward_info(row)
+                rewards[rank] = (name, count)
+            return [
+                EventGradeReward(
+                    label=SCORE_GRADES.get(rank, str(rank)),
+                    points=points[rank],
+                    item_name=rewards.get(rank, ("", 0))[0],
+                    item_count=rewards.get(rank, ("", 0))[1],
+                )
+                for rank in sorted(points)
+            ]
+
+        result: list[Event] = []
+        for row in data:
+            event_id = int(row.get("_id") or 0)
+            if not event_id:
+                continue
+
+            name_id = str(row.get("_nameTextId") or "")
+            name = self.text(name_id) or f"活动 #{event_id}"
+            event_type = int(row.get("_eventType") or 0)
+            type_label = EVENT_TYPES.get(event_type, "活动")
+
+            start_at = str(row.get("_startAt") or "")
+            end_at = str(row.get("_endAt") or "")
+            display_end_at = str(row.get("_displayEndAt") or "")
+            start_dt = parse_date(start_at)
+            end_dt = parse_date(end_at)
+            display_end_dt = parse_date(display_end_at)
+
+            logo, logo_fb = self.assets.event_logo(str(row.get("_logoAsset") or ""))
+            background, background_fb = self.assets.event_background(
+                str(row.get("_backgroundAsset") or "")
+            )
+            banner, banner_fb = self.assets.event_banner(
+                str(row.get("_bannerAsset") or "")
+            )
+            if not banner:
+                banner, banner_fb = background, background_fb
+
+            event_item = item_by_id.get(int(row.get("_eventItemId") or 0)) or {}
+            item_name = self.text(str(event_item.get("_nameTextId") or ""))
+            item_icon = self.assets.item(str(event_item.get("_imagePath") or ""))[0]
+
+            song = song_by_id.get(int(row.get("_musicId") or 0))
+
+            story = story_by_id.get(int(row.get("_storyChapterId") or 0)) or {}
+            story_name_id = str(story.get("_nameTextId") or "")
+            story_name = self.text(story_name_id)
+            story_text = self.text(str(story.get("_descriptionTextId") or ""))
+            # Some chapters repeat the title as the first description line.
+            if story_name and story_text.startswith(story_name):
+                story_text = story_text[len(story_name) :].lstrip(" \n")
+
+            member_bonuses: list[EventBonus] = []
+            support_bonuses: list[EventBonus] = []
+            rule_bonuses: list[EventBonus] = []
+            seen_member: set[int] = set()
+            seen_support: set[int] = set()
+            seen_rules: set[tuple[str, int]] = set()
+            for effect in effects_by_event.get(event_id, []):
+                values = [
+                    round(int(effect.get(f"_rank{rank}EffectValue") or 0) / 100, 1)
+                    for rank in range(1, 6)
+                ]
+                if not any(values):
+                    continue
+                member_id = int(effect.get("_memberCardId") or 0)
+                support_id = int(effect.get("_supportCardId") or 0)
+                band_id = int(effect.get("_bandId") or 0)
+                card_type = int(effect.get("_cardType") or 0)
+                if member_id and member_id not in seen_member:
+                    seen_member.add(member_id)
+                    card = card_by_id.get(member_id)
+                    if card:
+                        sub = " · ".join(
+                            part
+                            for part in (card.character_name, card.band_name)
+                            if part
+                        )
+                        member_bonuses.append(
+                            EventBonus(
+                                kind="member",
+                                name=card.title,
+                                sub=sub,
+                                values=values,
+                                color=card.band_color,
+                                icon=card.type_icon,
+                                image_url=card.thumb_url,
+                                image_fallback=card.thumb_fallback,
+                                detail_id=card.id,
+                            )
+                        )
+                    else:
+                        member_bonuses.append(
+                            EventBonus(
+                                kind="member",
+                                name=f"成员卡 #{member_id}",
+                                sub="成员",
+                                values=values,
+                            )
+                        )
+                elif support_id and support_id not in seen_support:
+                    seen_support.add(support_id)
+                    card = support_by_id.get(support_id)
+                    if card:
+                        people = "、".join(
+                            character.name for character in card.characters[:2]
+                        )
+                        sub = " · ".join(
+                            part for part in (people, card.band_name) if part
+                        )
+                        support_bonuses.append(
+                            EventBonus(
+                                kind="support",
+                                name=card.title,
+                                sub=sub,
+                                values=values,
+                                color=card.band_color,
+                                icon=card.type_icon,
+                                image_url=card.thumb_url,
+                                image_fallback=card.thumb_fallback,
+                                detail_id=card.id,
+                            )
+                        )
+                    else:
+                        support_bonuses.append(
+                            EventBonus(
+                                kind="support",
+                                name=f"支援卡 #{support_id}",
+                                sub="支援",
+                                values=values,
+                            )
+                        )
+                elif band_id and ("band", band_id) not in seen_rules:
+                    seen_rules.add(("band", band_id))
+                    band = self.bands.get(band_id)
+                    rule_bonuses.append(
+                        EventBonus(
+                            kind="band",
+                            name=band.name if band else f"乐队 #{band_id}",
+                            sub="乐队加成",
+                            values=values,
+                            color=band.color if band else "#0072C2",
+                        )
+                    )
+                elif card_type and ("attribute", card_type) not in seen_rules:
+                    seen_rules.add(("attribute", card_type))
+                    attribute = ATTRIBUTES.get(card_type)
+                    rule_bonuses.append(
+                        EventBonus(
+                            kind="attribute",
+                            name=attribute[0] if attribute else f"属性 {card_type}",
+                            sub="属性加成",
+                            values=values,
+                            color=attribute[2] if attribute else "#0072C2",
+                            icon=attribute_icon(card_type),
+                        )
+                    )
+
+            point_rewards: list[EventReward] = []
+            for achievement in sorted(
+                achievements_by_event.get(event_id, []),
+                key=lambda entry: int(entry.get("_eventPoint") or 0),
+            ):
+                labels: list[str] = []
+                icons: list[str] = []
+                for reward_id in achievement.get("_rewardIds") or []:
+                    reward = reward_by_id.get(int(reward_id))
+                    if not reward:
+                        continue
+                    name_text, icon, count = reward_info(reward)
+                    labels.append(
+                        f"{name_text} ×{count}" if count > 1 else name_text
+                    )
+                    if icon:
+                        icons.append(icon)
+                if labels:
+                    point_rewards.append(
+                        EventReward(
+                            point=int(achievement.get("_eventPoint") or 0),
+                            labels=labels,
+                            icons=icons,
+                        )
+                    )
+
+            loop_label = ""
+            for loop in loops_by_event.get(event_id, []):
+                parts = [
+                    reward_text(reward_by_id[int(reward_id)])
+                    for reward_id in loop.get("_rewardIds") or []
+                    if int(reward_id) in reward_by_id
+                ]
+                if not parts:
+                    continue
+                start = int(loop.get("_loopStartEventPoint") or 0)
+                step = int(loop.get("_loopEventPoint") or 0)
+                loop_label = f"{start:,} pt 后每 {step:,} pt：{'、'.join(parts)}"
+                break
+
+            search_parts = [
+                name,
+                self.all_text(name_id),
+                str(event_id),
+                type_label,
+                item_name,
+                self.all_text(str(event_item.get("_nameTextId") or "")),
+                story_name,
+                self.all_text(story_name_id),
+                story_text,
+                start_at,
+                end_at,
+                *(bonus.name for bonus in member_bonuses),
+                *(bonus.sub for bonus in member_bonuses),
+                *(bonus.name for bonus in support_bonuses),
+                *(bonus.sub for bonus in support_bonuses),
+                *(bonus.name for bonus in rule_bonuses),
+            ]
+            if song:
+                search_parts.extend((song.title, song.search_text))
+
+            result.append(
+                Event(
+                    id=event_id,
+                    name=name,
+                    event_type=event_type,
+                    type_label=type_label,
+                    start_at=format_date(start_at),
+                    end_at=format_date(end_at),
+                    display_end_at=format_date(display_end_at),
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    display_end_dt=display_end_dt,
+                    logo_url=logo,
+                    logo_fallback=logo_fb,
+                    background_url=background,
+                    background_fallback=background_fb,
+                    banner_url=banner,
+                    banner_fallback=banner_fb,
+                    item_name=item_name,
+                    item_icon=item_icon,
+                    song=song,
+                    story_name=story_name,
+                    story_text=story_text,
+                    member_bonuses=member_bonuses,
+                    support_bonuses=support_bonuses,
+                    rule_bonuses=rule_bonuses,
+                    point_rewards=point_rewards,
+                    loop_label=loop_label,
+                    live_rewards=grade_rows(
+                        live_points,
+                        live_rewards,
+                        int(row.get("_liveEventPointGroup") or 0),
+                        int(row.get("_liveEventRewardGroup") or 0),
+                    ),
+                    challenge_rewards=grade_rows(
+                        challenge_points,
+                        challenge_rewards,
+                        int(row.get("_challengeLiveEventPointGroup") or 0),
+                        int(row.get("_challengeLiveEventRewardGroup") or 0),
+                    ),
+                    search_text=" ".join(search_parts).lower(),
+                )
+            )
+
+        result.sort(
+            key=lambda event: (event.start_dt or datetime.min, event.id),
+            reverse=True,
+        )
         return result
 
     def _skills(

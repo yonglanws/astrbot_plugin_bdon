@@ -110,6 +110,10 @@ def test_patterns() -> None:
         "en查图鉴": ("en", "查图鉴", ""),
         "繁中查歌": ("繁中", "查歌", ""),
         "港台查歌": ("港台", "查歌", ""),
+        "查活动": ("", "查活动", ""),
+        "cn查活动 3": ("cn", "查活动", "3"),
+        "活动一览": ("", "活动一览", ""),
+        "查表情包 灯": ("", "查表情包", "灯"),
         "邦多利帮助": ("", "邦多利帮助", ""),
         "cn帮助": ("cn", "帮助", ""),
         "同步数据": ("", "同步数据", ""),
@@ -150,6 +154,8 @@ def test_layout() -> None:
     assert list_columns("support", 73) == 4
     assert list_columns("support", 2) == 2
     assert list_columns("comic", 25) == 4
+    assert list_columns("event", 3) == 2
+    assert list_columns("event", 1) == 1
     print("layout tests passed")
 
 
@@ -243,11 +249,15 @@ def test_plugin() -> None:
                 ("cn查卡 ６４", "card_detail.html", "card"),
                 ("hk查卡 64", "card_detail.html", "card"),
                 ("cn查支援卡", "support_list.html", None),
+                ("cn查活动", "event_detail.html", "event"),
+                ("cn查活动 3", "event_detail.html", "event"),
+                ("cn活动一览", "event_list.html", None),
                 ("cn查贴纸", "stamp_list.html", None),
                 ("tw查贴纸", "stamp_list.html", None),
                 ("cn查漫画", "comic_list.html", None),
                 ("cn查图鉴", "catalog.html", None),
                 ("cn查图鉴 歌曲", "song_list.html", None),
+                ("cn查图鉴 活动", "event_list.html", None),
             ]
             for text, template, key in cases:
                 event = FakeEvent(text)
@@ -267,23 +277,36 @@ def test_plugin() -> None:
             assert captured[0][1]["script"] == "simplified"
             assert captured[0][1]["region_prefix"] == ""
 
-            # Every current table fits in one image: pagination is not used.
-            for text, expected in (
-                ("cn查歌", 90),
-                ("cn查卡", 70),
-                ("cn查支援卡", 73),
-                ("cn查贴纸", 84),
-                ("cn查漫画", 25),
+            # Lists still fit in one image. Cards and songs only browse the
+            # newest 20 without a keyword; every other table stays complete.
+            for text, shown, total in (
+                ("cn查歌", 20, 90),
+                ("cn查卡", 20, 70),
+                ("cn查支援卡", 73, 73),
+                ("cn查贴纸", 84, 84),
+                ("cn查漫画", 25, 25),
             ):
                 event = FakeEvent(text)
                 results = [result async for result in plugin.on_bdon_message(event)]
                 assert results and results[-1][0] == "image", (text, results)
                 resolved = captured[-1][1]["resolved"]
-                assert resolved.pages == 1 and resolved.total == expected, (
+                assert resolved.pages == 1 and resolved.total == shown, (
                     text,
                     resolved.total,
                     resolved.pages,
                 )
+                browse = captured[-1][1].get("browse")
+                if total > shown:
+                    assert browse and browse["total"] == total, (text, browse)
+                else:
+                    assert browse is None, (text, browse)
+
+            # A keyword still searches the whole card/song table.
+            event = FakeEvent("cn查歌 MyGO")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results and results[-1][0] == "image", results
+            assert captured[-1][1]["resolved"].total > 20
+            assert "browse" not in captured[-1][1]
 
             # cn and tw/hk share one server but render different scripts from the
             # same tables; the cache keeps both variants.
@@ -292,6 +315,25 @@ def test_plugin() -> None:
             assert traditional.script == "traditional"
             assert any("灯" in stamp.name for stamp in dataset.stamps)
             assert any("燈" in stamp.name for stamp in traditional.stamps)
+            # Sticker names follow the selected script instead of leaking the
+            # traditional MasterText field into the default Simplified list.
+            assert dataset.stamps[0].name == "灯的表情1"
+            assert dataset.stamps[0].characters[0].name == "高松灯"
+            assert all("貼圖" not in stamp.name for stamp in dataset.stamps)
+            # Sticker artwork itself is localised: the Simplified dataset must
+            # not send the Traditional image files.
+            assert "/zh-Hans/" in dataset.stamps[0].image_url
+            assert "/zh-Hant/" in traditional.stamps[0].image_url
+
+            # Event data comes from MasterEvent plus its bonus/reward tables.
+            assert len(dataset.events) == 3
+            current_events = [event for event in dataset.events if event.status == "ongoing"]
+            assert len(current_events) == 1
+            current_event = current_events[0]
+            assert current_event.name == "Shake Your 魂, Baby!!"
+            assert current_event.song is not None
+            assert current_event.member_bonuses and current_event.support_bonuses
+            assert current_event.point_rewards and current_event.live_rewards
 
             # The tw prefix must reach the traditional dataset and keep the
             # prefix in its command hints.
@@ -303,6 +345,17 @@ def test_plugin() -> None:
             )
             assert tw_context["region_prefix"] == "tw "
             assert any("燈" in stamp.name for stamp in tw_context["resolved"].items)
+
+            cn_stamp_context = next(
+                context
+                for template, context in captured
+                if template == "stamp_list.html"
+                and context.get("script") == "simplified"
+            )
+            assert all(
+                "貼圖" not in stamp.name
+                for stamp in cn_stamp_context["resolved"].items
+            )
 
             # Raw-art commands bypass the renderer and send the asset URL.
             async def fake_fetch(url: str):
@@ -366,6 +419,14 @@ def test_plugin() -> None:
             ):
                 result = resolve(dataset.items_for(kind), query, kind=kind)
                 assert result.mode == expected, (query, result.mode, result.total)
+
+            sticker_hits = resolve(dataset.stamps, "灯", kind="stamp")
+            assert sticker_hits.total == 2, sticker_hits.total
+            assert all("灯" in stamp.name for stamp in sticker_hits.items)
+
+            event_hits = resolve(dataset.events, "Shake", kind="event")
+            assert event_hits.mode == "detail" and event_hits.item.id == 3
+            assert resolve(dataset.events, "3", kind="event").item.id == 3
 
             # A comic detail query sends the original illustration, while the
             # bare list command still renders the grid.

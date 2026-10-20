@@ -21,6 +21,12 @@ STAMP_LIST_WIDTH = 900
 LIST_SCALE = "normal"
 LIST_JPEG_QUALITY = 90
 
+# Cards and songs number in the dozens; a no-keyword browse shows only the
+# newest entries instead of a page several screens tall. Searching still covers
+# the whole table.
+BROWSE_LIMIT = 20
+BROWSE_KINDS = {"song", "card"}
+
 
 def list_columns(kind: str, count: int) -> int:
     """Columns for a result grid.
@@ -28,10 +34,13 @@ def list_columns(kind: str, count: int) -> int:
     Cards and songs cap at five columns; support/comic art is 16:9 or square
     with more internal detail, so it caps at four. Small result sets use fewer
     columns, which keeps the cards the same physical size instead of stretching
-    two results across the full canvas.
+    two results across the full canvas. Events are wide hero cards, so they use
+    at most two columns.
     """
     if count <= 0:
         return 1
+    if kind == "event":
+        return min(2, max(1, count))
     if kind in {"support", "comic"}:
         return min(4, max(1, count))
     if count <= 3:
@@ -172,6 +181,19 @@ MUSIC_CATEGORY_FALLBACK: dict[int, str] = {
     4: "其他",
 }
 
+# MasterEvent._eventType. Only the challenge-live format ships today.
+EVENT_TYPES: dict[int, str] = {1: "挑战演出"}
+
+# MasterLiveEvent*/MasterChallengeLiveEvent* score buckets.
+SCORE_GRADES: dict[int, str] = {
+    2: "D",
+    3: "C",
+    4: "B",
+    5: "A",
+    6: "S",
+    7: "SS",
+}
+
 # Tables the plugin needs. Missing optional tables only remove detail fields.
 REQUIRED_TABLES: tuple[str, ...] = (
     "MasterText",
@@ -183,6 +205,7 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "MasterLoadingComics",
     "MasterCharacter",
     "MasterBand",
+    "MasterEvent",
 )
 
 OPTIONAL_TABLES: tuple[str, ...] = (
@@ -193,6 +216,16 @@ OPTIONAL_TABLES: tuple[str, ...] = (
     "MasterSupportSkill",
     "MasterGekisouSkill",
     "MasterGekisouSupportSkill",
+    "MasterEventEffect",
+    "MasterEventAchievementReward",
+    "MasterEventAchievementLoopReward",
+    "MasterReward",
+    "MasterItem",
+    "MasterStoryChapter",
+    "MasterLiveEventPoint",
+    "MasterLiveEventReward",
+    "MasterChallengeLiveEventPoint",
+    "MasterChallengeLiveEventReward",
 )
 
 ALL_TABLES: tuple[str, ...] = REQUIRED_TABLES + OPTIONAL_TABLES
@@ -208,9 +241,17 @@ COMMAND_ALIASES: dict[str, str] = {
     "查支援卡": "support",
     "查支援": "support",
     "查snap": "support",
+    "查活动": "event",
+    "查活動": "event",
+    "活动一览": "event_list",
+    "活動一覽": "event_list",
+    "活动列表": "event_list",
+    "活動列表": "event_list",
     "查贴纸": "stamp",
     "查貼紙": "stamp",
+    "查貼圖": "stamp",
     "查表情": "stamp",
+    "查表情包": "stamp",
     "查漫画": "comic",
     "查漫畫": "comic",
     "查四格": "comic",
@@ -243,6 +284,8 @@ KIND_LABELS: dict[str, str] = {
     "support": "支援卡",
     "stamp": "贴纸",
     "comic": "漫画",
+    "event": "活动",
+    "event_list": "活动一览",
     "catalog": "图鉴",
     "help": "帮助",
 }
@@ -253,6 +296,8 @@ KIND_COMMANDS: dict[str, str] = {
     "support": "查支援卡",
     "stamp": "查贴纸",
     "comic": "查漫画",
+    "event": "查活动",
+    "event_list": "活动一览",
     "catalog": "查图鉴",
 }
 
