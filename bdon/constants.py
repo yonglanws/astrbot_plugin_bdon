@@ -266,10 +266,6 @@ COMMAND_ALIASES: dict[str, str] = {
     "說明": "help",
     "说明": "help",
     "help": "help",
-    "邦多利帮助": "help",
-    "邦邦帮助": "help",
-    "bdon帮助": "help",
-    "ournotes帮助": "help",
 }
 
 # Commands that return the raw card art instead of a rendered page. The value

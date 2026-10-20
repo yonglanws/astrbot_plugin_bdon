@@ -114,7 +114,8 @@ def test_patterns() -> None:
         "cn查活动 3": ("cn", "查活动", "3"),
         "活动一览": ("", "活动一览", ""),
         "查表情包 灯": ("", "查表情包", "灯"),
-        "邦多利帮助": ("", "邦多利帮助", ""),
+        "帮助": ("", "帮助", ""),
+        "help": ("", "help", ""),
         "cn帮助": ("cn", "帮助", ""),
         "同步数据": ("", "同步数据", ""),
         "card 64": ("", "card", "64"),
@@ -175,12 +176,6 @@ def test_plugin() -> None:
     assert plugin_main._display_prefix("tw") == "tw "
 
     async def run() -> None:
-        # Bare help is intentionally ignored so it does not hijack other plugins.
-        event = FakeEvent("帮助")
-        results = [result async for result in plugin.on_bdon_message(event)]
-        assert results == [] and not event.stopped
-
-        # Brand help is rendered (we replace the renderer with a dummy file).
         output = ROOT / "tests" / "output" / "help-test.png"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"test")
@@ -189,13 +184,24 @@ def test_plugin() -> None:
             return output
 
         plugin._render_help = fake_help  # type: ignore[assignment]
-        event = FakeEvent("邦多利帮助")
-        results = [result async for result in plugin.on_bdon_message(event)]
-        assert event.stopped and results == [("image", str(output))], results
+
+        # 帮助 / help work without a region prefix.
+        for text in ("帮助", "help"):
+            event = FakeEvent(text)
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert event.stopped and results == [("image", str(output))], (
+                text,
+                results,
+            )
 
         event = FakeEvent("jp帮助")
         results = [result async for result in plugin.on_bdon_message(event)]
         assert event.stopped and results == [("image", str(output))], results
+
+        # A bare 图鉴 is still too collision-prone and needs a prefix.
+        event = FakeEvent("图鉴")
+        results = [result async for result in plugin.on_bdon_message(event)]
+        assert results == [] and not event.stopped
 
         # Non-admin sync is rejected.
         event = FakeEvent("同步数据", admin=False)

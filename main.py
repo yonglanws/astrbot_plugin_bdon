@@ -1,4 +1,4 @@
-"""AstrBot plugin: BanG Dream! Our Notes song / card / support / stamp / comic queries."""
+"""AstrBot plugin: BanG Dream! Our Notes song / card / support / stamp / comic / event queries."""
 
 from __future__ import annotations
 
@@ -251,13 +251,9 @@ class BdonPlugin(Star):
         art_kind = ART_COMMANDS.get(raw_command.lower())
         if kind is None and art_kind is None:
             return
-        # A bare "帮助" / "图鉴" is too easy to collide with other plugins;
-        # require a region prefix (or a brand prefix for help).
+        # A bare "图鉴" is too easy to collide with other plugins; require a
+        # region prefix for it. 帮助 / help are allowed bare by design.
         if not region_prefix and raw_command.lower() in {
-            "帮助",
-            "说明",
-            "說明",
-            "help",
             "图鉴",
             "圖鑑",
         }:
