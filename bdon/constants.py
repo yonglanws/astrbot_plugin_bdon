@@ -16,6 +16,9 @@ DEFAULT_PREFIX = "cn"
 LIST_PAGE_SIZE = 10_000
 LIST_WIDTH = 1080
 DETAIL_WIDTH = 1080
+# Event pages are denser than a card detail; a narrower canvas gives the same
+# text a larger on-screen size when the chat client scales the image to fit.
+EVENT_WIDTH = 900
 # The sticker list keeps its original dense seven-column canvas.
 STAMP_LIST_WIDTH = 900
 LIST_SCALE = "normal"

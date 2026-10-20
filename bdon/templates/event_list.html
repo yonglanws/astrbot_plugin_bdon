@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import img, empty_state %}
 {% block content %}
+<div class="event-page">
 <header class="page-head">
   <div class="head-main">
     <div class="kicker">活动索引</div>
@@ -39,4 +40,5 @@
 {% else %}
 {{ empty_state('暂无活动', '还没有收录活动数据，请先同步 MasterData。') }}
 {% endif %}
+</div>
 {% endblock %}

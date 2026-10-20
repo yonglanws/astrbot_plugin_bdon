@@ -23,6 +23,7 @@ from bdon.constants import (  # noqa: E402
     DEFAULT_ASSET_BASE,
     DEFAULT_DATA_SOURCES,
     DETAIL_WIDTH,
+    EVENT_WIDTH,
     LIST_PAGE_SIZE,
     LIST_SCALE,
     LIST_WIDTH,
@@ -281,13 +282,19 @@ async def main(region: str) -> None:
     )
     if current is not None:
         ctx = base_context(
-            manager, region, "查活动 · 活动详情", KIND_ACCENTS["event"]
+            manager,
+            region,
+            "查活动 · 活动详情",
+            KIND_ACCENTS["event"],
+            page_width=EVENT_WIDTH,
         )
         ctx["event"] = current
         ctx["item"] = current
-        await render("event_detail", "event_detail.html", ctx)
+        await render("event_detail", "event_detail.html", ctx, width=EVENT_WIDTH)
 
-        ctx = base_context(manager, region, "活动一览", KIND_ACCENTS["event"])
+        ctx = base_context(
+            manager, region, "活动一览", KIND_ACCENTS["event"], page_width=EVENT_WIDTH
+        )
         ctx["resolved"] = resolve(
             dataset.events, "", page_size=LIST_PAGE_SIZE, kind="event"
         )
@@ -296,7 +303,7 @@ async def main(region: str) -> None:
             "event_list",
             "event_list.html",
             ctx,
-            width=LIST_WIDTH,
+            width=EVENT_WIDTH,
             image_type="jpeg",
             scale=LIST_SCALE,
         )

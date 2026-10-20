@@ -384,8 +384,6 @@
   .perf-rank{font-weight:600;color:var(--text)}
   .perf-pt{font-variant-numeric:tabular-nums;color:var(--text)}
   .perf-item{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .story-card{background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow-soft);font-size:14px;line-height:1.8;color:var(--muted);white-space:pre-line}
-  .story-name{font-size:15px;font-weight:600;color:var(--text);margin-bottom:3px}
   .event-grid{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;width:100%}
   .event-grid>.event-card{width:var(--card-width,calc(50% - 7px));max-width:var(--card-w,520px)}
   .event-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow);min-width:0}
@@ -399,6 +397,51 @@
   .event-period{font-size:13px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
   .event-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .event-songline{font-size:12.5px;color:var(--faint);margin-top:auto;padding-top:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Event pages use a narrower canvas, so give every text block a larger
+     size than the shared defaults instead of letting the client shrink it. */
+  .event-page{font-size:16px}
+  .event-page .page-title{font-size:32px}
+  .event-page .page-sub{font-size:16px}
+  .event-page .page-hint{font-size:14px}
+  .event-page .count-block b{font-size:24px}
+  .event-page .count-block span{font-size:13.5px}
+  .event-page .kicker{font-size:13.5px}
+  .event-page .chip{font-size:14px}
+  .event-page .event-hero{min-height:284px}
+  .event-page .event-title{font-size:36px}
+  .event-page .event-logo{height:62px}
+  .event-page .event-meta .chip{font-size:14px}
+  .event-page .state-pill{height:28px;font-size:13.5px;padding:0 12px}
+  .event-page .event-info{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .event-page .info-box{padding:12px 15px}
+  .event-page .info-label{font-size:13px}
+  .event-page .info-value{font-size:15.5px;line-height:1.5}
+  .event-page .event-song{padding:13px 15px}
+  .event-page .event-song>.pic{width:100px;height:100px;flex-basis:100px}
+  .event-page .song-title{font-size:21px}
+  .event-page .song-sub{font-size:15px}
+  .event-page .song-side{font-size:14px}
+  .event-page .bonus-panel{padding:13px 17px 9px}
+  .event-page .bonus-head b{font-size:16.5px}
+  .event-page .bonus-head span{font-size:13px}
+  .event-page .bonus-row{padding:9px 0}
+  .event-page .bonus-thumb{width:50px;height:50px;flex-basis:50px}
+  .event-page .bonus-name{font-size:15.5px}
+  .event-page .bonus-sub{font-size:13.5px}
+  .event-page .bonus-rate{font-size:14.5px;padding:4px 8px}
+  .event-page .rule-chip{font-size:14.5px;padding:6px 12px}
+  .event-page .reward-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .event-page .reward-row{padding:7px 10px;gap:8px}
+  .event-page .reward-icon{width:26px;height:26px;flex-basis:26px}
+  .event-page .reward-pt{font-size:13.5px}
+  .event-page .reward-text{font-size:14px}
+  .event-page .reward-note{font-size:14px;line-height:1.6}
+  .event-page .perf-title{font-size:16px}
+  .event-page .perf-row{font-size:14.5px;padding:6px 0}
+  .event-page .perf-head{font-size:12.5px}
+  .event-page .event-name{font-size:21px}
+  .event-page .event-period{font-size:14.5px}
+  .event-page .event-songline{font-size:14px}
   /* ---------- footer ---------- */
   .footer{
     display:flex;align-items:center;justify-content:space-between;gap:12px;

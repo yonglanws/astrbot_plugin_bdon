@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import picture, img, section_title %}
 {% block content %}
+<div class="event-page">
 <div class="event-hero {{ event.status_class }}">
   {% if event.background_url %}{{ img(event.background_url, event.background_fallback, event.name, 'hero-bg') }}{% endif %}
   <div class="event-state">
@@ -101,14 +102,6 @@
 {% endif %}
 {% endif %}
 
-{% if event.story_text %}
-{{ section_title('活动剧情', event.story_name) }}
-<div class="story-card">
-  {% if event.story_name %}<div class="story-name">{{ event.story_name }}</div>{% endif %}
-  {{ event.story_text }}
-</div>
-{% endif %}
-
 {% if event.point_rewards %}
 {{ section_title('点数奖励', event.point_rewards | length ~ ' 个里程碑') }}
 <div class="reward-grid">
@@ -154,4 +147,5 @@
   {% endif %}
 </div>
 {% endif %}
+</div>
 {% endblock %}

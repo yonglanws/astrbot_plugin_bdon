@@ -35,6 +35,7 @@ from .bdon.constants import (
     DEFAULT_ASSET_BASE,
     DEFAULT_DATA_SOURCES,
     DETAIL_WIDTH,
+    EVENT_WIDTH,
     KIND_COMMANDS,
     KIND_LABELS,
     LIST_JPEG_QUALITY,
@@ -633,7 +634,7 @@ class BdonPlugin(Star):
             region_prefix,
             command_label,
             KIND_ACCENTS["event"],
-            page_width=LIST_WIDTH,
+            page_width=EVENT_WIDTH,
         )
         context["resolved"] = resolved
         context["kind"] = "event"
@@ -641,7 +642,7 @@ class BdonPlugin(Star):
         return await self.renderer.render(
             "event_list.html",
             context,
-            width=LIST_WIDTH,
+            width=EVENT_WIDTH,
             image_type="jpeg",
             quality=LIST_JPEG_QUALITY,
             scale=LIST_SCALE,
@@ -730,20 +731,21 @@ class BdonPlugin(Star):
                     return item.image_url
                 raise RenderError(f"「{item.name}」暂无{label}图片")
             accent = getattr(item, "band_color", "") or KIND_ACCENTS[kind]
+            detail_width = EVENT_WIDTH if kind == "event" else DETAIL_WIDTH
             context = self._base_context(
                 region,
                 script,
                 region_prefix,
                 f"{command_label} · {KIND_LABELS[kind]}详情",
                 accent,
-                page_width=DETAIL_WIDTH,
+                page_width=detail_width,
             )
             context["item"] = item
             context[kind] = item
             return await self.renderer.render(
                 f"{kind}_detail.html",
                 context,
-                width=DETAIL_WIDTH,
+                width=detail_width,
                 scale=LIST_SCALE,
             )
 

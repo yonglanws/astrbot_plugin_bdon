@@ -266,9 +266,14 @@ def test_plugin() -> None:
                 assert captured[-1][0] == template, (text, captured[-1][0])
                 if key:
                     assert key in captured[-1][1], (text, captured[-1][1].keys())
-                # The sticker grid keeps its original narrow canvas; every other
-                # page uses the shared 1080px canvas.
-                expected_width = 900 if template == "stamp_list.html" else 1080
+                # The sticker grid keeps its original narrow canvas; event
+                # pages use their own narrower canvas for larger effective text.
+                expected_width = (
+                    900
+                    if template
+                    in {"stamp_list.html", "event_detail.html", "event_list.html"}
+                    else 1080
+                )
                 assert widths[-1] == expected_width, (text, widths[-1])
                 if template.endswith("_list.html"):
                     assert captured[-1][1]["columns"] >= 1
