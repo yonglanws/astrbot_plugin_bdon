@@ -1,6 +1,7 @@
-# 汐见萤Bot · 邦多利 Our Notes 查询插件
+# 邦多利 Our Notes 查询插件
 
-AstrBot 插件：查询《BanG Dream! Our Notes》的**歌曲、卡牌、支援卡、贴纸、四格漫画与活动**，并提供**图鉴总览**。
+查询《BanG Dream! Our Notes》的**歌曲、卡牌、支援卡、贴纸、四格漫画与活动**，并提供**图鉴总览**。
+
 界面参考 [bdon.moe](https://bdon.moe/) 的视觉风格（Material Design 3 浅色、卡片网格、乐队主题色），
 由 AstrBot t2i 渲染为图片返回。
 

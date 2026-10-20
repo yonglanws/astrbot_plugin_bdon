@@ -2,6 +2,18 @@
 {% from "_macros.html" import picture, img, section_title %}
 {% block content %}
 <div class="event-page">
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">活动详情</div>
+    <h1 class="page-title">{{ event.name }}</h1>
+    <div class="page-sub">{{ event.type_label }} · {{ event.period_label }}</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>#{{ event.id }}</b><span>活动 ID</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}活动一览</b> 查看全部活动</div>
+  </div>
+</header>
+
 <div class="event-hero {{ event.status_class }}">
   {% if event.background_url %}{{ img(event.background_url, event.background_fallback, event.name, 'hero-bg') }}{% endif %}
   <div class="event-state">
@@ -10,7 +22,6 @@
   </div>
   <div class="event-hero-inner">
     {% if event.logo_url %}{{ img(event.logo_url, event.logo_fallback, event.name, 'event-logo') }}{% endif %}
-    <h1 class="event-title">{{ event.name }}</h1>
     <div class="event-meta">
       <span class="chip">活动 #{{ event.id }}</span>
       <span class="chip">{{ event.type_label }}</span>
