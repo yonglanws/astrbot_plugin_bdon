@@ -109,6 +109,7 @@ def test_patterns() -> None:
         "kr查漫画": ("kr", "查漫画", ""),
         "en查图鉴": ("en", "查图鉴", ""),
         "繁中查歌": ("繁中", "查歌", ""),
+        "港台查歌": ("港台", "查歌", ""),
         "邦多利帮助": ("", "邦多利帮助", ""),
         "cn帮助": ("cn", "帮助", ""),
         "同步数据": ("", "同步数据", ""),
@@ -154,7 +155,7 @@ def test_layout() -> None:
 
 def test_plugin() -> None:
     plugin = plugin_main.BdonPlugin(None, {})
-    # 繁中服 is the only server behind the default prefix; cn selects Simplified
+    # 港台服 is the only server behind the default prefix; cn selects Simplified
     # text while tw/hk select the server's native Traditional text.
     assert plugin_main.resolve_region(None) == ("tw", "simplified")
     assert plugin_main.resolve_region("cn") == ("tw", "simplified")

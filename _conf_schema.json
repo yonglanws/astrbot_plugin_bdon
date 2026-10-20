@@ -10,7 +10,7 @@
     "type": "int",
     "default": 4,
     "slider": { "min": 0, "max": 23, "step": 1 },
-    "hint": "固定在第 30 分钟执行，同步繁中服、日服、韩服、国际服。"
+    "hint": "固定在第 30 分钟执行，同步港台服、日服、韩服、国际服。"
   },
   "render_endpoint": {
     "description": "可选：直连 t2i 回退地址",

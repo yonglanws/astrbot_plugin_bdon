@@ -559,7 +559,7 @@ class BdonPlugin(Star):
         }
 
     async def _render_help(self) -> str | Path:
-        # Help describes the default experience: 繁中服 rendered in Simplified
+        # Help describes the default experience: 港台服 rendered in Simplified
         # Chinese, with no region prefix in any example.
         context = self._base_context(
             "tw", "simplified", "", "帮助", KIND_ACCENTS["help"]

@@ -81,8 +81,8 @@ REGIONS: dict[str, RegionProfile] = {
     "tw": RegionProfile(
         key="tw",
         data_region="hk-tw-mo",
-        prefixes=("cn", "tw", "hk", "繁中", "台服", "港服", "港澳台"),
-        label="繁中服",
+        prefixes=("cn", "tw", "hk", "港台", "繁中", "台服", "港服", "港澳台"),
+        label="港台服",
         asset_prefix="",
         asset_language="zh-Hant",
     ),
@@ -126,7 +126,7 @@ PREFIX_SCRIPTS: dict[str, str] = {
 def resolve_region(prefix: str | None) -> tuple[str, str]:
     """Maps a command prefix to ``(server key, script)``.
 
-    An empty or unknown prefix falls back to cn, i.e. the 繁中服 tables rendered
+    An empty or unknown prefix falls back to cn, i.e. the 港台服 tables rendered
     in Simplified Chinese.
     """
     key = (prefix or DEFAULT_PREFIX).strip().lower()
