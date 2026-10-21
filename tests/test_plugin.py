@@ -114,9 +114,6 @@ def test_patterns() -> None:
         "cn查活动 3": ("cn", "查活动", "3"),
         "活动一览": ("", "活动一览", ""),
         "查表情包 灯": ("", "查表情包", "灯"),
-        "帮助": ("", "帮助", ""),
-        "help": ("", "help", ""),
-        "cn帮助": ("cn", "帮助", ""),
         "同步数据": ("", "同步数据", ""),
         "card 64": ("", "card", "64"),
         "scard 12": ("", "scard", "12"),
@@ -176,27 +173,8 @@ def test_plugin() -> None:
     assert plugin_main._display_prefix("tw") == "tw "
 
     async def run() -> None:
-        output = ROOT / "tests" / "output" / "help-test.png"
+        output = ROOT / "tests" / "output" / "route-test.png"
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"test")
-
-        async def fake_help() -> Path:
-            return output
-
-        plugin._render_help = fake_help  # type: ignore[assignment]
-
-        # 帮助 / help work without a region prefix.
-        for text in ("帮助", "help"):
-            event = FakeEvent(text)
-            results = [result async for result in plugin.on_bdon_message(event)]
-            assert event.stopped and results == [("image", str(output))], (
-                text,
-                results,
-            )
-
-        event = FakeEvent("jp帮助")
-        results = [result async for result in plugin.on_bdon_message(event)]
-        assert event.stopped and results == [("image", str(output))], results
 
         # A bare 图鉴 is still too collision-prone and needs a prefix.
         event = FakeEvent("图鉴")

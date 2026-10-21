@@ -66,7 +66,6 @@ KIND_ACCENTS = {
     "event": "#E05A7A",
     "event_list": "#E05A7A",
     "catalog": "#0072C2",
-    "help": "#4C9DF0",
 }
 
 CATALOG_SUBKINDS = {
@@ -252,7 +251,7 @@ class BdonPlugin(Star):
         if kind is None and art_kind is None:
             return
         # A bare "图鉴" is too easy to collide with other plugins; require a
-        # region prefix for it. 帮助 / help are allowed bare by design.
+        # region prefix for it.
         if not region_prefix and raw_command.lower() in {
             "图鉴",
             "圖鑑",
@@ -267,16 +266,6 @@ class BdonPlugin(Star):
                 event, region, script, region_prefix, art_kind, args
             ):
                 yield result
-            return
-
-        if kind == "help":
-            try:
-                path = await self._render_help()
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("[bdon] help render failed")
-                yield event.plain_result(f"渲染失败：{exc}")
-                return
-            yield event.image_result(str(path))
             return
 
         profile = REGIONS[region]
@@ -569,17 +558,6 @@ class BdonPlugin(Star):
             "page_width": page_width,
             "page_title": f"{profile.label} · {command_label} · 汐见萤Bot",
         }
-
-    async def _render_help(self) -> str | Path:
-        # Help describes the default experience: 港台服 rendered in Simplified
-        # Chinese, with no region prefix in any example.
-        context = self._base_context(
-            "tw", "simplified", "", "帮助", KIND_ACCENTS["help"]
-        )
-        context["page_title"] = "邦多利 Our Notes 帮助 · 汐见萤Bot"
-        return await self.renderer.render(
-            "help.html", context, width=LIST_WIDTH, scale=LIST_SCALE
-        )
 
     async def _render_catalog(
         self, region: str, script: str, region_prefix: str, dataset: Any

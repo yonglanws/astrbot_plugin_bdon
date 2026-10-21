@@ -48,7 +48,6 @@ KIND_ACCENTS = {
     "comic": "#FF8899",
     "event": "#E05A7A",
     "catalog": "#0072C2",
-    "help": "#4C9DF0",
 }
 OUTPUT = ROOT / "tests" / "output"
 DATA = ROOT / "tests" / ".data"
@@ -307,10 +306,6 @@ async def main(region: str) -> None:
             image_type="jpeg",
             scale=LIST_SCALE,
         )
-
-    # Help
-    ctx = base_context(manager, region, "帮助", KIND_ACCENTS["help"])
-    await render("help", "help.html", ctx)
 
     # Search result lists
     ctx = base_context(manager, region, "查歌 · MyGO", KIND_ACCENTS["song"])

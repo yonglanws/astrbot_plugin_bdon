@@ -262,10 +262,6 @@ COMMAND_ALIASES: dict[str, str] = {
     "查圖鑑": "catalog",
     "图鉴": "catalog",
     "圖鑑": "catalog",
-    "帮助": "help",
-    "說明": "help",
-    "说明": "help",
-    "help": "help",
 }
 
 # Commands that return the raw card art instead of a rendered page. The value
@@ -286,7 +282,6 @@ KIND_LABELS: dict[str, str] = {
     "event": "活动",
     "event_list": "活动一览",
     "catalog": "图鉴",
-    "help": "帮助",
 }
 
 KIND_COMMANDS: dict[str, str] = {
