@@ -14,7 +14,6 @@ import threading
 from functools import lru_cache
 from pathlib import Path
 
-
 ALIAS_FILE = Path(__file__).resolve().parents[1] / "res" / "character_aliases.json"
 
 _lock = threading.Lock()

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_macros.html" import picture, attr_chip, band_pill, char_face, difficulty_cards %}
+{% from "_macros.html" import picture, attr_chip, band_pill, char_face, difficulty_cards, section_title %}
+{% set diff_label = song.difficulties[-1].label if song.difficulties else '' %}
 {% block content %}
 <div class="detail-grid">
   <div class="detail-media">
@@ -35,30 +36,61 @@
     </div>
 
     <div class="divider"></div>
-    {{ difficulty_cards(song.difficulties) }}
-
-    <div class="divider"></div>
     <div class="meta-list">
       <div class="meta-item"><div class="meta-label">作曲</div><div class="meta-value">{{ song.composer or '—' }}</div></div>
       <div class="meta-item"><div class="meta-label">作词</div><div class="meta-value">{{ song.lyricist or '—' }}</div></div>
       <div class="meta-item"><div class="meta-label">编曲</div><div class="meta-value">{{ song.arranger or '—' }}</div></div>
       <div class="meta-item"><div class="meta-label">实装日期</div><div class="meta-value">{{ song.start_at or '—' }}</div></div>
+      <div class="meta-item meta-wide"><div class="meta-label">激奏任务</div><div class="meta-value">{{ song.gekisou_missions | join(' · ') or '—' }}</div></div>
     </div>
 
-    <div class="summary-strip push-bottom">
-      <div class="summary-item">
-        <div class="summary-label">最高难度</div>
-        <div class="summary-value">{{ (song.difficulties | map(attribute='level') | max) if song.difficulties else '—' }}</div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-label">总物量</div>
-        <div class="summary-value">{{ song.difficulties | sum(attribute='notes') | num }}</div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-label">收录谱面</div>
-        <div class="summary-value">{{ song.difficulties | length }}<small>个难度</small></div>
-      </div>
+    <div class="divider"></div>
+    {{ difficulty_cards(song.difficulties) }}
+
+    {% if metrics %}
+    <div class="metric-grid">
+      <div class="metric"><div class="metric-label">BPM</div><div class="metric-value">{{ metrics.bpm_label }}</div></div>
+      <div class="metric"><div class="metric-label">时长</div><div class="metric-value">{{ metrics.duration_label }}</div></div>
+      <div class="metric"><div class="metric-label">小节数</div><div class="metric-value">{{ metrics.bars }}<small>小节</small></div></div>
+      <div class="metric"><div class="metric-label">{{ metrics.difficulty_label }} 密度</div><div class="metric-value">{{ metrics.nps if metrics.nps is not none else '—' }}{% if metrics.nps is not none %}<small>音符/s</small>{% endif %}</div></div>
     </div>
+    {% endif %}
   </div>
 </div>
+
+{% if song.score_ranks or song.combo_tiers %}
+<div class="rules-grid">
+  {% if song.score_ranks %}
+  <div class="rules-card">
+    {{ section_title('得分评级', '按得分结算') }}
+    <div class="score-table">
+      <div class="score-row score-head"><span>评级</span><span class="score-num">所需分数</span><span class="score-num">独奏演出</span><span class="score-reward">评级奖励</span></div>
+      {% for rank in song.score_ranks %}
+      <div class="score-row">
+        <span class="score-rank">{{ rank.label }}</span>
+        <span class="score-num">{{ rank.required | num }}</span>
+        <span class="score-num">{% if rank.battle %}{{ rank.battle | num }}{% else %}—{% endif %}</span>
+        <span class="score-reward">{{ rank.reward or '—' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if song.combo_tiers %}
+  <div class="rules-card">
+    {{ section_title('连击奖励', ('最高难度 ' ~ diff_label) if diff_label else '按连击达成率') }}
+    <div class="score-table combo-table">
+      <div class="score-row score-head"><span>达成</span><span class="score-num">连击数</span><span class="score-reward">奖励</span></div>
+      {% for tier in song.combo_tiers %}
+      <div class="score-row">
+        <span class="score-rank">{{ tier.label }}</span>
+        <span class="score-num">{{ tier.combo | num }}<small>连击</small></span>
+        <span class="score-reward">{{ tier.reward or '—' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

@@ -39,7 +39,7 @@
 <div class="diff-grid">
   {% for diff in difficulties %}
   <div class="diff-card" style="--diff:{{ diff.color }}">
-    <div class="diff-top"><span class="diff-label">{{ diff.label }}</span><span class="diff-notes">{{ diff.notes }} notes</span></div>
+    <div class="diff-top"><span class="diff-label">{{ diff.label }}</span><span class="diff-notes">{{ diff.notes }} 物量</span></div>
     <div class="diff-level">{{ diff.display_level }}</div>
     <div class="diff-track"><span style="width:{{ (diff.level / 30 * 100) | round(0) }}%"></span></div>
   </div>
@@ -61,6 +61,32 @@
   <h2 class="section-title">{{ title }}</h2>
   {% if sub %}<span class="section-sub">{{ sub }}</span>{% endif %}
 </div>
+{%- endmacro %}
+
+{# One skill with every level's real values, as MoeNotes' detail page shows. #}
+{% macro skill_card(skill) -%}
+<article class="skill-card skill-wide">
+  <div class="skill-head">
+    {% if skill.icon_url %}<img class="skill-icon" src="{{ skill.icon_url }}" alt="" loading="eager" onerror="this.style.display='none'">{% endif %}
+    <div class="skill-main">
+      <div class="skill-label">{{ skill.label }}{% if skill.skill_id %} <span class="skill-id">#{{ skill.skill_id }}</span>{% endif %}</div>
+      <div class="skill-name">{{ skill.name }}</div>
+    </div>
+    {% if skill.levels %}<span class="skill-level-tag">Lv.{{ skill.levels[0].level }}–{{ skill.levels[-1].level }}</span>{% endif %}
+  </div>
+  {% if skill.levels %}
+  <div class="level-table">
+    {% for level in skill.levels %}
+    <div class="level-row{% if loop.last %} is-max{% endif %}">
+      <span class="level-chip">Lv.{{ level.level }}</span>
+      <span class="level-desc">{{ level.description or '—' }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif skill.description %}
+  <div class="skill-desc">{{ skill.description }}</div>
+  {% endif %}
+</article>
 {%- endmacro %}
 
 {% macro empty_state(title, text, suggestions=[]) -%}

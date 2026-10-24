@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, attr_chip, band_pill %}
+{% block styles %}
+  .chart-head{
+    display:grid;grid-template-columns:112px minmax(0,1fr) auto;gap:18px;align-items:stretch;
+    background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-xl);
+    padding:18px 20px;box-shadow:var(--shadow);max-width:1080px;
+  }
+  .chart-jacket{width:112px;height:112px;align-self:start}
+  .chart-jacket .pic{width:100%;height:100%;border-radius:14px;border:1px solid var(--outline-soft)}
+  .chart-main{min-width:0;display:flex;flex-direction:column}
+  .chart-title{font-size:31px;font-weight:600;line-height:1.25;margin:4px 0 0;letter-spacing:.2px}
+  .chart-title-ja{font-size:16px;color:var(--faint);margin-top:3px}
+  .chart-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+  .chart-credits{font-size:16px;color:var(--muted);margin-top:auto;padding-top:12px;line-height:1.6}
+  .chart-credits b{color:var(--text);font-weight:600}
+  .diff-panel{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    min-width:170px;border-radius:var(--radius-lg);padding:14px 22px;
+    background:color-mix(in srgb,var(--diff) 10%, #ffffff);
+    border:1px solid color-mix(in srgb,var(--diff) 26%, #ffffff);
+  }
+  .diff-panel .diff-tag{font-size:16px;font-weight:700;letter-spacing:1.5px;color:#fff;
+    padding:3px 14px;border-radius:9px;background:var(--diff);
+    box-shadow:0 3px 9px color-mix(in srgb,var(--diff) 34%, transparent)}
+  .diff-panel .diff-level{font-size:46px;font-weight:700;line-height:1.05;
+    color:color-mix(in srgb,var(--diff) 82%, #17181a);font-variant-numeric:tabular-nums}
+  .diff-panel .diff-name{font-size:15px;color:var(--muted)}
+  .chart-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:14px;max-width:1080px}
+  .chart-stat{background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-md);
+    padding:11px 14px;box-shadow:var(--shadow-soft)}
+  .chart-stat .label{font-size:14.5px;color:var(--faint);letter-spacing:.4px}
+  .chart-stat .value{font-size:23px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+  .chart-stat .value small{font-size:14px;color:var(--faint);font-weight:400;margin-left:2px}
+  .chart-legend{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin-top:14px;
+    background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-md);
+    padding:10px 16px;box-shadow:var(--shadow-soft);font-size:15.5px;color:var(--muted);
+    max-width:1080px;
+  }
+  .legend-item{display:inline-flex;align-items:center;gap:6px;font-weight:600;letter-spacing:.4px}
+  .legend-glyph{display:block}
+  .legend-note{margin-left:auto;font-size:15px;color:var(--faint)}
+  .credit-bar{
+    display:flex;align-items:center;gap:10px;margin-top:14px;
+    border-radius:var(--radius-md);padding:11px 16px;font-size:15.5px;color:#3d4a70;
+    background:linear-gradient(90deg,color-mix(in srgb,#4C9DF0 12%, #ffffff),color-mix(in srgb,#705399 10%, #ffffff));
+    border:1px solid color-mix(in srgb,#4C9DF0 22%, #ffffff);max-width:1080px;
+  }
+  .credit-bar b{font-weight:700}
+  .credit-bar .heart{color:#E05A7A;font-weight:700}
+  .chart-panel{
+    margin-top:14px;background:#ffffff;border:1px solid var(--outline);
+    border-radius:var(--radius-xl);padding:16px 16px 10px;box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .chart-svg{display:block;margin:0 auto;font-family:"MiSansEmbedded","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",sans-serif}
+  .chart-svg .bar-num{font-size:13px;fill:#505C6A}
+  .chart-svg .bar-num.major{font-size:14px;font-weight:700;fill:#1E2937}
+  .chart-svg .tick-num{font-size:11.5px;fill:#6E7A89;font-variant-numeric:tabular-nums}
+  .chart-svg .tick-line{stroke:#D9DFE7;stroke-width:.7}
+  .chart-svg .col-label{font-size:17px;font-weight:700;fill:#1E2937;letter-spacing:.5px}
+  .chart-svg .time-label{font-size:12px;fill:#858d97}
+  .chart-svg .anno{font-weight:600;letter-spacing:.2px}
+  .chart-svg .anno-note{font-size:10.5px;font-weight:600;letter-spacing:.4px}
+  .chart-hint{font-size:15.5px;color:var(--faint);margin-top:12px;line-height:1.6;max-width:1080px}
+  .chart-hint b{color:var(--accent);font-weight:600}
+{% endblock %}
+{% block content %}
+<div class="chart-head">
+  <div class="chart-jacket">
+    {{ picture(song.jacket_url, song.jacket_fallback, song.title, '', '♪') }}
+  </div>
+  <div class="chart-main">
+    <div class="kicker">2D 谱面预览 · CHART SHEET</div>
+    <h1 class="chart-title">{{ song.title }}</h1>
+    {% if song.title_ja and song.title_ja != song.title %}<div class="chart-title-ja">{{ song.title_ja }}</div>{% endif %}
+    <div class="chart-meta">
+      <span class="chip mono id-chip">#{{ song.display_id }}</span>
+      {{ band_pill(song.band_name, song.band_color) }}
+      {{ attr_chip(song.type_label, song.type_color, song.type_icon) }}
+      {% if song.categories %}{% for category in song.categories %}<span class="chip">{{ category }}</span>{% endfor %}{% endif %}
+    </div>
+    <div class="chart-credits">
+      {% if credit_line %}<b>{{ credit_line }}</b>{% endif %}
+    </div>
+  </div>
+  <div class="diff-panel" style="--diff:{{ difficulty.color }}">
+    <span class="diff-tag">{{ difficulty.label }}</span>
+    <span class="diff-level">{{ difficulty.display_level }}</span>
+    <span class="diff-name">{{ difficulty_name }}</span>
+  </div>
+</div>
+
+<div class="chart-stats">
+  <div class="chart-stat"><div class="label">物量 COMBO</div><div class="value">{{ difficulty.notes | num }}</div></div>
+  <div class="chart-stat"><div class="label">速度 BPM</div><div class="value">{{ sheet.bpm_label }}</div></div>
+  <div class="chart-stat"><div class="label">小节数</div><div class="value">{{ sheet.bars_count }}<small>小节</small></div></div>
+  <div class="chart-stat"><div class="label">时长</div><div class="value">{{ sheet.duration_label }}</div></div>
+  <div class="chart-stat"><div class="label">Fever 段</div><div class="value">{{ sheet.fever_count }}<small>次</small></div></div>
+</div>
+
+<div class="chart-legend">
+  {% for item in sheet.legend %}<span class="legend-item">{{ item.glyph | safe }}{{ item.label }}</span>{% endfor %}
+  <span class="legend-note">{{ sheet.columns }} 列 · 每列 24 轨 · 时间从下往上，从左往右读 · 左侧数字为小节号，灰色小字为音符时值（/4 四分音符 · /8 八分音符 · /16 十六分音符）</span>
+</div>
+
+<div class="credit-bar">
+  <span>谱面解析与排版移植自 <b>luoxiadesu/moenotes-chart-renderer</b>（MIT）· 谱面数据来自 <b>assets.bdon.moe</b> <span class="heart">★</span></span>
+</div>
+
+<div class="chart-panel">
+  {{ sheet.svg | safe }}
+</div>
+
+<div class="chart-hint">
+  换难度：<b>{{ prefix }}查谱面 {{ song.display_id }} EZ / NM / HD / EX</b>；查歌曲详情：<b>{{ prefix }}查歌 {{ song.display_id }}</b>
+</div>
+{% endblock %}
+{% block footer %}
+<span><b>汐见萤Bot</b> · {{ region.label }}{% if script_label %} · {{ script_label }}{% endif %}{% if command_label %} · {{ command_label }}{% endif %}</span>
+<span class="right">Designed by 慵懒午睡 · 谱面预览移植自 moenotes-chart-renderer，特别致谢</span>
+{% endblock %}

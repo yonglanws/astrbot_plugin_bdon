@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 PLUGIN_NAME = "astrbot_plugin_bdon"
 # cn is the default prefix: it reads the same hk-tw-mo tables as tw/hk but shows
 # Simplified Chinese text, which is what most of the bot's users read.
@@ -34,11 +33,12 @@ BROWSE_KINDS = {"song", "card"}
 def list_columns(kind: str, count: int) -> int:
     """Columns for a result grid.
 
-    Cards and songs cap at five columns; support/comic art is 16:9 or square
-    with more internal detail, so it caps at four. Small result sets use fewer
-    columns, which keeps the cards the same physical size instead of stretching
-    two results across the full canvas. Events are wide hero cards, so they use
-    at most two columns.
+    Four columns is the cap for songs/cards: at 1080px that keeps each card
+    around 250px wide, which leaves room for the larger chat-readable type.
+    Support/comic art is 16:9 or square with more internal detail, so it caps
+    at four as well. Small result sets use fewer columns, which keeps the cards
+    the same physical size instead of stretching two results across the full
+    canvas. Events are wide hero cards, so they use at most two columns.
     """
     if count <= 0:
         return 1
@@ -50,9 +50,7 @@ def list_columns(kind: str, count: int) -> int:
         return count
     if count <= 6:
         return 3
-    if count <= 8:
-        return 4
-    return 5
+    return 4
 
 
 # cn shows Simplified Chinese. tw/hk/kr/en show Traditional Chinese from the
@@ -177,6 +175,24 @@ DIFFICULTIES: tuple[tuple[str, str, str, str], ...] = (
     ("expert", "EX", "_expertID", "#D9536F"),
 )
 
+# MasterLiveMusicComboReward._comboRateType: the combo share each tier pays on,
+# in display order. A tier's combo count is ceil(chart notes × share).
+COMBO_TIERS: tuple[tuple[int, int], ...] = ((0, 25), (1, 50), (2, 75), (3, 100))
+
+# Tokens accepted as the difficulty argument of 查谱面. Stand-alone digits 1-4
+# work too ("查谱面 1 ex" and "查谱面 ex 1" both pick expert).
+CHART_DIFFICULTY_WORDS: dict[str, str] = {
+    "ez": "easy", "easy": "easy", "简单": "easy", "簡單": "easy",
+    "nm": "normal", "normal": "normal", "普通": "normal",
+    "hd": "hard", "hard": "hard", "困难": "hard", "困難": "hard",
+    "ex": "expert", "expert": "expert", "专家": "expert", "專家": "expert",
+    "1": "easy", "2": "normal", "3": "hard", "4": "expert",
+}
+DIFFICULTY_NAMES: dict[str, str] = {
+    "easy": "简单 EASY", "normal": "普通 NORMAL", "hard": "困难 HARD",
+    "expert": "专家 EXPERT",
+}
+
 MUSIC_CATEGORY_FALLBACK: dict[int, str] = {
     1: "原创曲",
     2: "翻唱曲",
@@ -219,6 +235,26 @@ OPTIONAL_TABLES: tuple[str, ...] = (
     "MasterSupportSkill",
     "MasterGekisouSkill",
     "MasterGekisouSupportSkill",
+    # Skill level tables: descriptions carry placeholders that the effect rows
+    # fill in, so all five levels can be shown with their real values.
+    "MasterLeaderSkillEffect",
+    "MasterLiveSkillEffect",
+    "MasterGekisouSkillEffect",
+    "MasterSupportSkillEffect",
+    "MasterGekisouSupportSkillEffect",
+    "MasterSkillIcon",
+    "MasterSkillConditionSet",
+    "MasterSkillCondition",
+    "MasterSkillCumulativeCondition",
+    "MasterSkillTarget",
+    # Card growth: level caps, training (awake) and awakening (rank) rates,
+    # plus support-card limit-break steps and their skill levels.
+    "MasterMemberCardLevel",
+    "MasterMemberCardLevelLimit",
+    "MasterMemberCardAwake",
+    "MasterMemberCardRank",
+    "MasterSupportCardLevel",
+    "MasterSupportCardRank",
     "MasterEventEffect",
     "MasterEventAchievementReward",
     "MasterEventAchievementLoopReward",
@@ -229,6 +265,11 @@ OPTIONAL_TABLES: tuple[str, ...] = (
     "MasterLiveEventReward",
     "MasterChallengeLiveEventPoint",
     "MasterChallengeLiveEventReward",
+    # Song live rules: the per-song score-rank thresholds plus the shared
+    # score / combo reward ladders the song row points at.
+    "MasterLiveScoreRank",
+    "MasterLiveMusicScoreReward",
+    "MasterLiveMusicComboReward",
 )
 
 ALL_TABLES: tuple[str, ...] = REQUIRED_TABLES + OPTIONAL_TABLES
@@ -238,14 +279,26 @@ COMMAND_ALIASES: dict[str, str] = {
     "查歌": "song",
     "查曲": "song",
     "查歌曲": "song",
+    "歌曲": "song",
+    "song": "song",
+    "music": "song",
+    "看歌": "song",
+    "看歌曲": "song",
     "查卡": "card",
+    "查牌": "card",
     "查卡牌": "card",
     "查卡面": "card",
+    "看卡": "card",
+    "看卡面": "card",
     "查支援卡": "support",
     "查支援": "support",
     "查snap": "support",
+    "看支援卡": "support",
     "查活动": "event",
     "查活動": "event",
+    "活动": "event",
+    "活動": "event",
+    "event": "event",
     "活动一览": "event_list",
     "活動一覽": "event_list",
     "活动列表": "event_list",
@@ -258,10 +311,37 @@ COMMAND_ALIASES: dict[str, str] = {
     "查漫画": "comic",
     "查漫畫": "comic",
     "查四格": "comic",
+    "查曲绘": "jacket",
+    "查曲繪": "jacket",
+    "曲绘": "jacket",
+    "曲繪": "jacket",
+    "查谱面": "chart",
+    "查譜面": "chart",
+    "查谱": "chart",
+    "查譜": "chart",
+    "谱面": "chart",
+    "譜面": "chart",
+    "谱面预览": "chart",
+    "譜面預覽": "chart",
+    "谱面查询": "chart",
+    "譜面查詢": "chart",
+    # 铺 is the common typo of 谱; accept it so mistyped queries still work.
+    "铺面": "chart",
+    "鋪面": "chart",
+    "查铺面": "chart",
+    "查鋪面": "chart",
+    "铺面查询": "chart",
+    "鋪面查詢": "chart",
+    "铺面预览": "chart",
+    "鋪面預覽": "chart",
     "查图鉴": "catalog",
     "查圖鑑": "catalog",
     "图鉴": "catalog",
     "圖鑑": "catalog",
+    "帮助": "help",
+    "說明": "help",
+    "说明": "help",
+    "help": "help",
 }
 
 # Commands that return the raw card art instead of a rendered page. The value
@@ -279,9 +359,11 @@ KIND_LABELS: dict[str, str] = {
     "support": "支援卡",
     "stamp": "贴纸",
     "comic": "漫画",
+    "chart": "谱面",
     "event": "活动",
     "event_list": "活动一览",
     "catalog": "图鉴",
+    "help": "帮助",
 }
 
 KIND_COMMANDS: dict[str, str] = {
@@ -290,9 +372,11 @@ KIND_COMMANDS: dict[str, str] = {
     "support": "查支援卡",
     "stamp": "查贴纸",
     "comic": "查漫画",
+    "chart": "查谱面",
     "event": "查活动",
     "event_list": "活动一览",
     "catalog": "查图鉴",
+    "help": "帮助",
 }
 
 SYNC_COMMANDS: tuple[str, ...] = ("同步数据", "同步masterdata")

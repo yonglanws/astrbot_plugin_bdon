@@ -5,7 +5,7 @@
   <div class="head-main">
     <div class="kicker">成员卡牌</div>
     <h1 class="page-title">{% if resolved.query %}搜索「{{ resolved.query }}」{% elif browse %}最新卡牌{% else %}全部卡牌{% endif %}</h1>
-    <div class="page-sub">{% if resolved.query %}按匹配度排序{% elif browse %}共 {{ browse.total }} 张 · 仅展示最近 {{ browse.shown }} 张{% else %}按稀有度与实装顺序{% endif %}</div>
+    <div class="page-sub">{% if resolved.query %}按匹配度排序{% elif browse %}共 {{ browse.total }} 张 · 仅展示最近 {{ browse.shown }} 张{% else %}按实装时间从新到旧{% endif %}</div>
   </div>
   <div class="page-side">
     <div class="count-block"><b>{{ browse.total if browse else resolved.total }}</b><span>张卡牌</span></div>
@@ -14,7 +14,7 @@
 </header>
 
 {% if resolved.items %}
-<div class="list-grid" style="--card-w:216px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
+<div class="list-grid" style="--card-w:250px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
   {% for card in resolved.items %}
   <div class="item-card">
     <div class="item-cover square">

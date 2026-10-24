@@ -4,25 +4,33 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+import struct
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Iterable
+from typing import Any
 
 from .aliases import character_aliases
 from .assets import AssetBuilder
 from .constants import (
     ATTRIBUTES,
+    COMBO_TIERS,
     DIFFICULTIES,
     EVENT_TYPES,
     MEMBER_RARITIES,
     MUSIC_CATEGORY_FALLBACK,
-    RegionProfile,
     SCORE_GRADES,
     SCRIPT_TEXT_FIELDS,
     SUPPORT_RARITIES,
+    RegionProfile,
 )
 from .icons import attribute_icon, rarity_icon
-
+from .skills import (
+    SkillTextContext,
+    compact_description,
+    format_description,
+    group_effects_by_level,
+)
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 TAG_RE = re.compile(
@@ -32,6 +40,8 @@ TAG_RE = re.compile(
 )
 PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
 DATE_FORMATS = ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%Y-%m-%d")
+# MasterLiveMusic _gekisouMission1..3: the mission type of each gekisou section.
+GEKISOU_MISSION_LABELS = {1: "连击", 2: "幸运", 3: "Just 数"}
 
 
 def rows(table: Any) -> list[dict[str, Any]]:
@@ -131,6 +141,35 @@ class Difficulty:
     level: int
     display_level: str
     notes: int
+    score_id: int = 0
+    # MasterLiveMusicScore._musicScoreTextFileName, e.g. "0001/0001_03"; the
+    # score JSON lives at Live/MusicScore/<chart_key>/<file>.json.
+    chart_key: str = ""
+
+
+@dataclass
+class ScoreRank:
+    """One row of the song's live score ladder (the D row is always 0 and dropped)."""
+
+    label: str
+    required: int
+    battle: int
+    reward: str = ""
+
+
+@dataclass
+class ComboTier:
+    """One combo-share row of the song's combo ladder on its hardest chart."""
+
+    label: str
+    combo: int
+    reward: str = ""
+
+
+@dataclass
+class SkillLevel:
+    level: int
+    description: str
 
 
 @dataclass
@@ -138,6 +177,32 @@ class Skill:
     label: str
     name: str
     description: str
+    levels: list[SkillLevel] = field(default_factory=list)
+    skill_id: int = 0
+    icon_url: str = ""
+    icon_fallback: str = ""
+
+
+@dataclass
+class CardGrowth:
+    """The card at its maximum build: top level, training and awakening."""
+
+    max_level: int
+    max_awake: int
+    max_rank: int
+    leader_skill_level: int
+    performance: int
+    technic: int
+    visual: int
+    total_power: int
+
+
+@dataclass
+class SupportGrowth:
+    max_level: int
+    max_rank: int
+    support_skill_level: int
+    gekisou_skill_level: int
 
 
 @dataclass
@@ -166,6 +231,9 @@ class Song:
     sort_order: int
     search_text: str = ""
     type_icon: str = ""
+    gekisou_missions: list[str] = field(default_factory=list)
+    score_ranks: list[ScoreRank] = field(default_factory=list)
+    combo_tiers: list[ComboTier] = field(default_factory=list)
 
     @property
     def title_for_search(self) -> str:
@@ -209,6 +277,7 @@ class Card:
     search_text: str = ""
     rarity_icon: str = ""
     type_icon: str = ""
+    growth: CardGrowth | None = None
 
     @property
     def title_for_search(self) -> str:
@@ -250,6 +319,8 @@ class SupportCard:
     search_text: str = ""
     rarity_icon: str = ""
     type_icon: str = ""
+    growth: SupportGrowth | None = None
+    diary: str = ""
 
     @property
     def title_for_search(self) -> str:
@@ -465,6 +536,79 @@ class Dataset:
         }[kind]
 
 
+@dataclass
+class _SkillDefinition:
+    id: int
+    name: str
+    template: str
+    fallback_description: str
+    icon_url: str = ""
+    icon_fallback: str = ""
+
+
+@dataclass
+class _SkillLibrary:
+    """Skill definitions, their effect rows and the shared condition lookups."""
+
+    definitions: dict[str, dict[int, _SkillDefinition]]
+    effects: dict[str, dict[int, list[dict[str, Any]]]]
+    context: SkillTextContext
+
+    def build(self, label: str, kind: str, skill_id: Any) -> Skill | None:
+        try:
+            numeric = int(skill_id or 0)
+        except (TypeError, ValueError):
+            numeric = 0
+        if numeric <= 0:
+            return None
+        definition = self.definitions.get(kind, {}).get(numeric)
+        if definition is None:
+            return None
+        rows = self.effects.get(kind, {}).get(numeric, [])
+        levels = (
+            [
+                SkillLevel(
+                    level,
+                    compact_description(
+                        format_description(definition.template, level_rows, self.context)
+                    ),
+                )
+                for level, level_rows in group_effects_by_level(rows)
+            ]
+            if rows
+            else []
+        )
+        # The max level is what players compare; keep it as the summary. Without
+        # effect tables (older/partial region data) fall back to the cleaned
+        # template instead of showing one level with missing numbers.
+        description = (
+            levels[-1].description if levels else definition.fallback_description
+        )
+        return Skill(
+            label=label,
+            name=definition.name or f"技能 #{numeric}",
+            description=description,
+            levels=levels,
+            skill_id=numeric,
+            icon_url=definition.icon_url,
+            icon_fallback=definition.icon_fallback,
+        )
+
+
+def _f32(value: float) -> float:
+    return struct.unpack("f", struct.pack("f", value))[0]
+
+
+def _scale_by_rate(maximum: int, rate: int) -> int:
+    """The client's FloorToInt((float)(rate * max) / 1e4f)."""
+    return math.floor(_f32(_f32(rate * maximum) / 10000))
+
+
+def _scale_by_rate_factor(maximum: int, rate: int) -> int:
+    """The client's awake term, which multiplies in the other order."""
+    return math.floor(_f32(_f32(rate / 10000) * _f32(maximum)))
+
+
 class DatasetBuilder:
     def __init__(
         self,
@@ -497,29 +641,92 @@ class DatasetBuilder:
             for row in rows(tables.get("MasterTag"))
             if row.get("_id") is not None
         }
-        leader_skills = self._build_skill_table(rows(tables.get("MasterLeaderSkill")))
-        live_skills = self._build_skill_table(rows(tables.get("MasterLiveSkill")))
-        support_skills = self._build_skill_table(rows(tables.get("MasterSupportSkill")))
-        gekisou_skills = self._build_skill_table(rows(tables.get("MasterGekisouSkill")))
-        gekisou_support_skills = self._build_skill_table(
-            rows(tables.get("MasterGekisouSupportSkill"))
+        skill_icons = self._build_skill_icons(rows(tables.get("MasterSkillIcon")))
+        skills = _SkillLibrary(
+            definitions={
+                "leader": self._build_skill_table(
+                    rows(tables.get("MasterLeaderSkill")), skill_icons
+                ),
+                "live": self._build_skill_table(
+                    rows(tables.get("MasterLiveSkill")), skill_icons
+                ),
+                "support": self._build_skill_table(
+                    rows(tables.get("MasterSupportSkill")), skill_icons
+                ),
+                "gekisou": self._build_skill_table(
+                    rows(tables.get("MasterGekisouSkill")), skill_icons
+                ),
+                "gekisou_support": self._build_skill_table(
+                    rows(tables.get("MasterGekisouSupportSkill")), skill_icons
+                ),
+            },
+            effects={
+                "leader": self._effect_index(
+                    rows(tables.get("MasterLeaderSkillEffect")), "_leaderSkillID"
+                ),
+                "live": self._effect_index(
+                    rows(tables.get("MasterLiveSkillEffect")), "_liveSkillID"
+                ),
+                "support": self._effect_index(
+                    rows(tables.get("MasterSupportSkillEffect")), "_supportSkillID"
+                ),
+                "gekisou": self._effect_index(
+                    rows(tables.get("MasterGekisouSkillEffect")), "_gekisouSkillID"
+                ),
+                "gekisou_support": self._effect_index(
+                    rows(tables.get("MasterGekisouSupportSkillEffect")),
+                    "_gekisouSupportSkillID",
+                ),
+            },
+            context=SkillTextContext(
+                condition_sets=self._condition_sets(
+                    rows(tables.get("MasterSkillConditionSet"))
+                ),
+                conditions=self._index(
+                    rows(tables.get("MasterSkillCondition"))
+                ),
+                cumulative=self._index(
+                    rows(tables.get("MasterSkillCumulativeCondition"))
+                ),
+                targets=self._index(rows(tables.get("MasterSkillTarget"))),
+                band_names={band.id: band.name for band in self.bands.values()},
+                character_names={
+                    character.id: character.name
+                    for character in self.characters.values()
+                },
+            ),
         )
+        growth_tables = {
+            "levels": rows(tables.get("MasterMemberCardLevel")),
+            "level_limits": rows(tables.get("MasterMemberCardLevelLimit")),
+            "awakes": rows(tables.get("MasterMemberCardAwake")),
+            "ranks": rows(tables.get("MasterMemberCardRank")),
+            "support_levels": rows(tables.get("MasterSupportCardLevel")),
+            "support_ranks": rows(tables.get("MasterSupportCardRank")),
+        }
 
-        songs = self._build_songs(
-            rows(tables.get("MasterLiveMusic")), scores, categories, tags
-        )
         cards = self._build_cards(
-            rows(tables.get("MasterMemberCard")),
-            leader_skills,
-            live_skills,
-            gekisou_skills,
+            rows(tables.get("MasterMemberCard")), skills, growth_tables
         )
         supports = self._build_supports(
-            rows(tables.get("MasterSupportCard")),
-            support_skills,
-            gekisou_support_skills,
+            rows(tables.get("MasterSupportCard")), skills, growth_tables
         )
         stamps = self._build_stamps(rows(tables.get("MasterStamp")))
+        # Songs come after the reward sources: their live rules (score ranks,
+        # score / combo rewards) resolve item names through the same tables.
+        resolve_reward = self._make_reward_resolver(
+            rows(tables.get("MasterItem")), cards, supports, stamps
+        )
+        songs = self._build_songs(
+            rows(tables.get("MasterLiveMusic")),
+            scores,
+            categories,
+            tags,
+            resolve_reward,
+            rows(tables.get("MasterLiveScoreRank")),
+            rows(tables.get("MasterLiveMusicScoreReward")),
+            rows(tables.get("MasterLiveMusicComboReward")),
+        )
         comics = self._build_comics(rows(tables.get("MasterLoadingComics")))
         events = self._build_events(
             rows(tables.get("MasterEvent")),
@@ -533,10 +740,10 @@ class DatasetBuilder:
             rows(tables.get("MasterLiveEventReward")),
             rows(tables.get("MasterChallengeLiveEventPoint")),
             rows(tables.get("MasterChallengeLiveEventReward")),
+            resolve_reward,
             songs,
             cards,
             supports,
-            stamps,
         )
 
         return Dataset(
@@ -568,6 +775,17 @@ class DatasetBuilder:
     def raw_text(self, text_id: str, field_name: str) -> str:
         row = self.texts.get(text_id) or {}
         return clean_text((row.get(field_name) or "").strip())
+
+    def template_text(self, text_id: str) -> str:
+        """The untrimmed template, keeping the ``{effects[...]}`` placeholders."""
+        if not text_id:
+            return ""
+        row = self.texts.get(text_id) or {}
+        for field_name in self.text_fields:
+            value = (row.get(field_name) or "").strip()
+            if value and value != text_id:
+                return value
+        return ""
 
     def all_text(self, text_id: str) -> str:
         """Every language of a row, for cross-language search."""
@@ -640,17 +858,68 @@ class DatasetBuilder:
                 result[int(category_id)] = pair
         return result
 
-    def _build_skill_table(
+    def _build_skill_icons(
         self, data: Iterable[dict[str, Any]]
     ) -> dict[int, tuple[str, str]]:
-        result: dict[int, tuple[str, str]] = {}
+        return {
+            int(row.get("_id") or 0): self.assets.skill_icon(
+                str(row.get("_normalIconAssetName") or "")
+            )
+            for row in data
+            if row.get("_id")
+        }
+
+    def _build_skill_table(
+        self,
+        data: Iterable[dict[str, Any]],
+        icons: Mapping[int, tuple[str, str]],
+    ) -> dict[int, _SkillDefinition]:
+        result: dict[int, _SkillDefinition] = {}
         for row in data:
             skill_id = int(row.get("_id") or 0)
             if not skill_id:
                 continue
-            name = self.text(str(row.get("_nameTextID") or ""))
-            description = self.text(str(row.get("_descriptionTextFormatID") or ""))
-            result[skill_id] = (name, description)
+            icon_url, icon_fallback = icons.get(
+                int(row.get("_skillIconID") or 0), ("", "")
+            )
+            text_id = str(row.get("_descriptionTextFormatID") or "")
+            result[skill_id] = _SkillDefinition(
+                id=skill_id,
+                name=self.text(str(row.get("_nameTextID") or "")),
+                # Keep the placeholders: the formatter fills them per level.
+                template=self.template_text(text_id),
+                fallback_description=compact_description(self.text(text_id)),
+                icon_url=icon_url,
+                icon_fallback=icon_fallback,
+            )
+        return result
+
+    @staticmethod
+    def _index(data: Iterable[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+        return {
+            int(row.get("_id") or 0): row
+            for row in data
+            if row.get("_id") is not None
+        }
+
+    @staticmethod
+    def _effect_index(
+        data: Iterable[dict[str, Any]], field_name: str
+    ) -> dict[int, list[dict[str, Any]]]:
+        result: dict[int, list[dict[str, Any]]] = {}
+        for row in data:
+            skill_id = int(row.get(field_name) or 0)
+            if skill_id:
+                result.setdefault(skill_id, []).append(row)
+        return result
+
+    @staticmethod
+    def _condition_sets(
+        data: Iterable[dict[str, Any]]
+    ) -> dict[int, list[dict[str, Any]]]:
+        result: dict[int, list[dict[str, Any]]] = {}
+        for row in data:
+            result.setdefault(int(row.get("_group") or 0), []).append(row)
         return result
 
     def _characters(self, ids: Iterable[int]) -> list[Character]:
@@ -671,7 +940,30 @@ class DatasetBuilder:
         scores: dict[int, dict[str, Any]],
         categories: dict[int, tuple[str, str]],
         tags: dict[int, tuple[str, str]],
+        resolve_reward: Callable[[dict[str, Any]], tuple[str, str, int]],
+        score_rank_rows: Iterable[dict[str, Any]],
+        score_reward_rows: Iterable[dict[str, Any]],
+        combo_rows: Iterable[dict[str, Any]],
     ) -> list[Song]:
+        ranks_by_group: dict[int, list[dict[str, Any]]] = {}
+        for entry in score_rank_rows:
+            ranks_by_group.setdefault(int(entry.get("_group") or 0), []).append(entry)
+        score_rewards_by_group: dict[int, dict[int, list[str]]] = {}
+        for entry in score_reward_rows:
+            name, _, count = resolve_reward(entry)
+            score_rewards_by_group.setdefault(int(entry.get("_group") or 0), {}).setdefault(
+                int(entry.get("_liveScoreRank") or 0), []
+            ).append(f"{name} ×{count}" if name and count > 1 else name)
+        combos_by_group: dict[int, dict[int, dict[int, list[dict[str, Any]]]]] = {}
+        for entry in combo_rows:
+            tier_value = entry.get("_comboRateType")
+            tier = int(tier_value) if tier_value is not None else -1
+            combos_by_group.setdefault(int(entry.get("_group") or 0), {}).setdefault(
+                int(entry.get("_difficulty") or 0), {}
+            ).setdefault(tier, []).append(entry)
+        difficulty_index = {
+            key: index for index, (key, _label, _field, _color) in enumerate(DIFFICULTIES)
+        }
         result: list[Song] = []
         now = datetime.now()
         for row in data:
@@ -699,6 +991,8 @@ class DatasetBuilder:
                             or score.get("_musicScoreLevel")
                         ),
                         notes=int(score.get("_fullComboCount") or 0),
+                        score_id=score_id,
+                        chart_key=str(score.get("_musicScoreTextFileName") or ""),
                     )
                 )
             music_type = int(row.get("_musicType") or 0)
@@ -739,6 +1033,60 @@ class DatasetBuilder:
             composer = self.text(str(row.get("_composerTextID") or ""))
             lyricist = self.text(str(row.get("_lyricistTextID") or ""))
             arranger = self.text(str(row.get("_arrangerTextID") or ""))
+            mission_counts: dict[int, int] = {}
+            for index in (1, 2, 3):
+                mission = int(row.get(f"_gekisouMission{index}") or 0)
+                if mission in GEKISOU_MISSION_LABELS:
+                    mission_counts[mission] = mission_counts.get(mission, 0) + 1
+            gekisou_missions = [
+                GEKISOU_MISSION_LABELS[mission]
+                + (f" ×{count}" if count > 1 else "")
+                for mission, count in mission_counts.items()
+            ]
+            score_ranks: list[ScoreRank] = []
+            rewards = score_rewards_by_group.get(
+                int(row.get("_scoreRankRewardGroup") or 0), {}
+            )
+            for entry in sorted(
+                ranks_by_group.get(int(row.get("_liveScoreRankGroup") or 0), []),
+                key=lambda entry: int(entry.get("_liveScoreRank") or 0),
+            ):
+                required = int(entry.get("_requiredScore") or 0)
+                # The D row always requires 0 and pays nothing; the page hides it.
+                if required <= 0:
+                    continue
+                rank_id = int(entry.get("_liveScoreRank") or 0)
+                score_ranks.append(
+                    ScoreRank(
+                        label=SCORE_GRADES.get(rank_id, str(rank_id)),
+                        required=required,
+                        battle=int(entry.get("_battleLiveRequiredScore") or 0),
+                        reward="、".join(rewards.get(rank_id) or []),
+                    )
+                )
+            combo_tiers: list[ComboTier] = []
+            if difficulties:
+                hardest = difficulties[-1]
+                hardest_tiers = combos_by_group.get(
+                    int(row.get("_comboRewardGroup") or 0), {}
+                ).get(difficulty_index.get(hardest.key, -1), {})
+                for tier_code, percent in COMBO_TIERS:
+                    entries = hardest_tiers.get(tier_code) or []
+                    if not entries:
+                        continue
+                    labels = []
+                    for entry in entries:
+                        name, _, count = resolve_reward(entry)
+                        labels.append(
+                            f"{name} ×{count}" if name and count > 1 else name
+                        )
+                    combo_tiers.append(
+                        ComboTier(
+                            label="全连" if percent >= 100 else f"{percent}%",
+                            combo=math.ceil(hardest.notes * percent / 100),
+                            reward="、".join(labels),
+                        )
+                    )
             search_parts = [
                 title,
                 title_ja,
@@ -785,6 +1133,9 @@ class DatasetBuilder:
                     is_new=is_new,
                     sort_order=int(row.get("_sortOrder") or song_id),
                     search_text=" ".join(search_parts).lower(),
+                    gekisou_missions=gekisou_missions,
+                    score_ranks=score_ranks,
+                    combo_tiers=combo_tiers,
                 )
             )
         result.sort(key=lambda song: (song.sort_order, song.id))
@@ -794,9 +1145,8 @@ class DatasetBuilder:
     def _build_cards(
         self,
         data: Iterable[dict[str, Any]],
-        leader_skills: dict[int, tuple[str, str]],
-        live_skills: dict[int, tuple[str, str]],
-        gekisou_skills: dict[int, tuple[str, str]],
+        skills: _SkillLibrary,
+        growth_tables: Mapping[str, list[dict[str, Any]]],
     ) -> list[Card]:
         result: list[Card] = []
         now = datetime.now()
@@ -824,16 +1174,21 @@ class DatasetBuilder:
             art, art_fb = self.assets.card_full(asset_id)
             thumb, thumb_fb = self.assets.card_thumb(asset_id)
             face, face_fb = self.assets.character_face(character_id)
-            skills = self._skills(
-                (
-                    ("队长技能", row.get("_leaderSkillID"), leader_skills),
-                    ("Live 技能", row.get("_liveSkillID"), live_skills),
-                    ("激奏技能", row.get("_gekisouSkillID"), gekisou_skills),
+            card_skills = [
+                skill
+                for skill in (
+                    skills.build("队长技能", "leader", row.get("_leaderSkillID")),
+                    skills.build("Live 技能", "live", row.get("_liveSkillID")),
+                    skills.build("激奏技能", "gekisou", row.get("_gekisouSkillID")),
                 )
-            )
+                if skill is not None
+            ]
             performance = int(row.get("_performancePowerMax") or 0)
             technic = int(row.get("_technicPowerMax") or 0)
             visual = int(row.get("_visualPowerMax") or 0)
+            growth = self._build_card_growth(
+                row, performance, technic, visual, growth_tables
+            )
             start_at = str(row.get("_startAt") or "")
             start_dt = parse_date(start_at)
             is_new = bool(
@@ -880,22 +1235,27 @@ class DatasetBuilder:
                     thumb_fallback=thumb_fb,
                     face_url=face,
                     face_fallback=face_fb,
-                    skills=skills,
+                    skills=card_skills,
                     start_at=format_date(start_at),
                     start_dt=start_dt,
                     is_new=is_new,
                     search_text=" ".join(search_parts).lower(),
+                    growth=growth,
                 )
             )
-        result.sort(key=lambda card: (-card.rarity, -card.id))
+        # Release order, newest first: the list is a release timeline, not a
+        # rarity ranking (the no-keyword browse already shows the newest 20).
+        result.sort(
+            key=lambda card: (card.start_dt or datetime.min, card.id), reverse=True
+        )
         return result
 
     # -- support cards ---------------------------------------------------------
     def _build_supports(
         self,
         data: Iterable[dict[str, Any]],
-        support_skills: dict[int, tuple[str, str]],
-        gekisou_support_skills: dict[int, tuple[str, str]],
+        skills: _SkillLibrary,
+        growth_tables: Mapping[str, list[dict[str, Any]]],
     ) -> list[SupportCard]:
         result: list[SupportCard] = []
         now = datetime.now()
@@ -916,28 +1276,34 @@ class DatasetBuilder:
             type_icon = attribute_icon(card_type)
             title = self.text(str(row.get("_descriptionTextID") or ""))
             name = self.text(str(row.get("_nameTextID") or ""))
+            diary = self.text(str(row.get("_diaryTextID") or ""))
+            if diary.strip().lower() in {"coming soon", "敬请期待", "敬請期待"}:
+                diary = ""
             asset_id = int(row.get("_assetID") or support_id)
             art, art_fb = self.assets.support_full(asset_id)
             thumb, thumb_fb = self.assets.support_thumb(asset_id)
-            skills = self._skills(
-                (
-                    ("支援技能 1", row.get("_supportSkillId01"), support_skills),
-                    ("支援技能 2", row.get("_supportSkillId02"), support_skills),
-                    (
+            support_card_skills = [
+                skill
+                for skill in (
+                    skills.build("支援技能 1", "support", row.get("_supportSkillId01")),
+                    skills.build("支援技能 2", "support", row.get("_supportSkillId02")),
+                    skills.build(
                         "激奏支援 1",
+                        "gekisou_support",
                         row.get("_gekisouSupportSkillId01"),
-                        gekisou_support_skills,
                     ),
-                    (
+                    skills.build(
                         "激奏支援 2",
+                        "gekisou_support",
                         row.get("_gekisouSupportSkillId02"),
-                        gekisou_support_skills,
                     ),
                 )
-            )
+                if skill is not None
+            ]
             performance = int(row.get("_performancePowerMax") or 0)
             technic = int(row.get("_technicPowerMax") or 0)
             visual = int(row.get("_visualPowerMax") or 0)
+            growth = self._build_support_growth(row, growth_tables)
             start_at = str(row.get("_startAt") or "")
             start_dt = parse_date(start_at)
             is_new = bool(
@@ -982,14 +1348,20 @@ class DatasetBuilder:
                     art_fallback=art_fb,
                     thumb_url=thumb,
                     thumb_fallback=thumb_fb,
-                    skills=skills,
+                    skills=support_card_skills,
                     start_at=format_date(start_at),
                     start_dt=start_dt,
                     is_new=is_new,
                     search_text=" ".join(search_parts).lower(),
+                    growth=growth,
+                    diary=diary,
                 )
             )
-        result.sort(key=lambda card: (-card.rarity, -card.id))
+        # Release order, newest first: the list is a release timeline, not a
+        # rarity ranking (the no-keyword browse already shows the newest 20).
+        result.sort(
+            key=lambda card: (card.start_dt or datetime.min, card.id), reverse=True
+        )
         return result
 
     # -- stamps ----------------------------------------------------------------
@@ -1076,57 +1448,30 @@ class DatasetBuilder:
         result.sort(key=lambda comic: (comic.order, comic.id))
         return result
 
-    # -- events ----------------------------------------------------------------
-    def _build_events(
+    # -- rewards ---------------------------------------------------------------
+    def _make_reward_resolver(
         self,
-        data: Iterable[dict[str, Any]],
-        effects: Iterable[dict[str, Any]],
-        achievements: Iterable[dict[str, Any]],
-        loop_rewards: Iterable[dict[str, Any]],
-        reward_table: Iterable[dict[str, Any]],
         item_rows: Iterable[dict[str, Any]],
-        story_rows: Iterable[dict[str, Any]],
-        live_points: Iterable[dict[str, Any]],
-        live_rewards: Iterable[dict[str, Any]],
-        challenge_points: Iterable[dict[str, Any]],
-        challenge_rewards: Iterable[dict[str, Any]],
-        songs: list[Song],
         cards: list[Card],
         supports: list[SupportCard],
         stamps: list[Stamp],
-    ) -> list[Event]:
+    ) -> Callable[[dict[str, Any]], tuple[str, str, int]]:
+        """Resolves one MasterReward-shaped row into (name, icon, count).
+
+        Shared by the event rewards and the song live rules (score / combo
+        rewards), which carry the same ``_resourceType/_resourceId/_resourceCount``
+        fields.
+        """
         item_by_id = {
             int(row.get("_id") or 0): row
             for row in item_rows
             if row.get("_id") is not None
         }
-        reward_by_id = {
-            int(row.get("_id") or 0): row
-            for row in reward_table
-            if row.get("_id") is not None
-        }
-        story_by_id = {
-            int(row.get("_id") or 0): row
-            for row in story_rows
-            if row.get("_id") is not None
-        }
-        song_by_id = {song.id: song for song in songs}
         card_by_id = {card.id: card for card in cards}
         support_by_id = {card.id: card for card in supports}
         stamp_by_id = {stamp.id: stamp for stamp in stamps}
 
-        effects_by_event: dict[int, list[dict[str, Any]]] = {}
-        for row in effects:
-            effects_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
-        achievements_by_event: dict[int, list[dict[str, Any]]] = {}
-        for row in achievements:
-            achievements_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
-        loops_by_event: dict[int, list[dict[str, Any]]] = {}
-        for row in loop_rewards:
-            loops_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
-
-        def reward_info(reward: dict[str, Any]) -> tuple[str, str, int]:
-            """Resolves one MasterReward row into a display label and icon."""
+        def resolve(reward: dict[str, Any]) -> tuple[str, str, int]:
             resource_type = int(reward.get("_resourceType") or 0)
             resource_id = int(reward.get("_resourceId") or 0)
             count = int(reward.get("_resourceCount") or 0)
@@ -1165,8 +1510,58 @@ class DatasetBuilder:
                 name = f"奖励 #{resource_id}" if resource_id else "奖励"
             return name, icon, count
 
+        return resolve
+
+    # -- events ----------------------------------------------------------------
+    def _build_events(
+        self,
+        data: Iterable[dict[str, Any]],
+        effects: Iterable[dict[str, Any]],
+        achievements: Iterable[dict[str, Any]],
+        loop_rewards: Iterable[dict[str, Any]],
+        reward_table: Iterable[dict[str, Any]],
+        item_rows: Iterable[dict[str, Any]],
+        story_rows: Iterable[dict[str, Any]],
+        live_points: Iterable[dict[str, Any]],
+        live_rewards: Iterable[dict[str, Any]],
+        challenge_points: Iterable[dict[str, Any]],
+        challenge_rewards: Iterable[dict[str, Any]],
+        resolve_reward: Callable[[dict[str, Any]], tuple[str, str, int]],
+        songs: list[Song],
+        cards: list[Card],
+        supports: list[SupportCard],
+    ) -> list[Event]:
+        item_by_id = {
+            int(row.get("_id") or 0): row
+            for row in item_rows
+            if row.get("_id") is not None
+        }
+        reward_by_id = {
+            int(row.get("_id") or 0): row
+            for row in reward_table
+            if row.get("_id") is not None
+        }
+        story_by_id = {
+            int(row.get("_id") or 0): row
+            for row in story_rows
+            if row.get("_id") is not None
+        }
+        song_by_id = {song.id: song for song in songs}
+        card_by_id = {card.id: card for card in cards}
+        support_by_id = {card.id: card for card in supports}
+
+        effects_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in effects:
+            effects_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+        achievements_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in achievements:
+            achievements_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+        loops_by_event: dict[int, list[dict[str, Any]]] = {}
+        for row in loop_rewards:
+            loops_by_event.setdefault(int(row.get("_eventId") or 0), []).append(row)
+
         def reward_text(reward: dict[str, Any]) -> str:
-            name, _, count = reward_info(reward)
+            name, _, count = resolve_reward(reward)
             return f"{name} ×{count}" if count > 1 else name
 
         def grade_rows(
@@ -1185,7 +1580,7 @@ class DatasetBuilder:
                 if int(row.get("_eventGroup") or 0) != reward_group:
                     continue
                 rank = int(row.get("_scoreRank") or 0)
-                name, _, count = reward_info(row)
+                name, _, count = resolve_reward(row)
                 rewards[rank] = (name, count)
             return [
                 EventGradeReward(
@@ -1356,7 +1751,7 @@ class DatasetBuilder:
                     reward = reward_by_id.get(int(reward_id))
                     if not reward:
                         continue
-                    name_text, icon, count = reward_info(reward)
+                    name_text, icon, count = resolve_reward(reward)
                     labels.append(
                         f"{name_text} ×{count}" if count > 1 else name_text
                     )
@@ -1456,23 +1851,140 @@ class DatasetBuilder:
         )
         return result
 
-    def _skills(
+    def _build_card_growth(
         self,
-        entries: Iterable[tuple[str, Any, dict[int, tuple[str, str]]]],
-    ) -> list[Skill]:
-        result = []
-        for label, skill_id, table in entries:
-            try:
-                numeric = int(skill_id or 0)
-            except (TypeError, ValueError):
-                numeric = 0
-            if numeric <= 0:
-                continue
-            name, description = table.get(numeric, ("", ""))
-            if not name and not description:
-                continue
-            result.append(Skill(label=label, name=name or f"技能 #{numeric}", description=description))
-        return result
+        row: Mapping[str, Any],
+        performance: int,
+        technic: int,
+        visual: int,
+        tables: Mapping[str, list[dict[str, Any]]],
+    ) -> CardGrowth | None:
+        """Max level / training / awakening and the resulting parameters."""
+        level_group = int(row.get("_memberCardLevelGroup") or 0)
+        curve: dict[int, tuple[int, int, int]] = {
+            int(entry.get("_level") or 0): (
+                int(entry.get("_performanceRate") or 0),
+                int(entry.get("_technicRate") or 0),
+                int(entry.get("_visualRate") or 0),
+            )
+            for entry in tables.get("levels", [])
+            if int(entry.get("_group") or 0) == level_group
+        }
+        if not curve:
+            return None
+        curve_max = max(curve)
+
+        awake_group = int(row.get("_memberCardAwakeGroup") or 0)
+        awake_rows = sorted(
+            (
+                entry
+                for entry in tables.get("awakes", [])
+                if int(entry.get("_group") or 0) == awake_group
+            ),
+            key=lambda entry: int(entry.get("_awakeCount") or 0),
+        )
+        if awake_rows:
+            last_awake = awake_rows[-1]
+            max_awake = int(last_awake.get("_awakeCount") or 0)
+            awake_rates = (
+                int(last_awake.get("_performanceRate") or 0),
+                int(last_awake.get("_technicRate") or 0),
+                int(last_awake.get("_visualRate") or 0),
+            )
+            limit = next(
+                (
+                    int(entry.get("_limitLevel") or 0)
+                    for entry in tables.get("level_limits", [])
+                    if int(entry.get("_rarity") or 0) == int(row.get("_rarity") or 0)
+                    and int(entry.get("_awakeCount") or 0) == max_awake
+                ),
+                curve_max,
+            )
+            max_level = min(limit or curve_max, curve_max)
+        else:
+            max_awake = 0
+            max_level = curve_max
+            awake_rates = (0, 0, 0)
+
+        rank_group = int(row.get("_memberCardRankGroup") or 0)
+        rank_rows = sorted(
+            (
+                entry
+                for entry in tables.get("ranks", [])
+                if int(entry.get("_group") or 0) == rank_group
+            ),
+            key=lambda entry: int(entry.get("_rank") or 0),
+        )
+        if rank_rows:
+            last_rank = rank_rows[-1]
+            max_rank = int(last_rank.get("_rank") or 0)
+            leader_skill_level = int(last_rank.get("_leaderSkillLevel") or 1)
+            rank_rates = (
+                int(last_rank.get("_performanceRate") or 0),
+                int(last_rank.get("_technicRate") or 0),
+                int(last_rank.get("_visualRate") or 0),
+            )
+        else:
+            max_rank = 0
+            leader_skill_level = 1
+            rank_rates = (0, 0, 0)
+
+        level_rates = curve.get(max_level) or curve[curve_max]
+        base = (performance, technic, visual)
+        final = tuple(
+            _scale_by_rate(base[index], level_rates[index])
+            + _scale_by_rate_factor(base[index], awake_rates[index])
+            + _scale_by_rate(base[index], rank_rates[index])
+            for index in range(3)
+        )
+        return CardGrowth(
+            max_level=max_level,
+            max_awake=max_awake,
+            max_rank=max_rank,
+            leader_skill_level=leader_skill_level,
+            performance=final[0],
+            technic=final[1],
+            visual=final[2],
+            total_power=sum(final),
+        )
+
+    @staticmethod
+    def _build_support_growth(
+        row: Mapping[str, Any],
+        tables: Mapping[str, list[dict[str, Any]]],
+    ) -> SupportGrowth | None:
+        level_group = int(row.get("_supportCardLevelGroup") or 0)
+        levels = [
+            int(entry.get("_level") or 0)
+            for entry in tables.get("support_levels", [])
+            if int(entry.get("_group") or 0) == level_group
+        ]
+        if not levels:
+            return None
+        curve_max = max(levels)
+        rank_group = int(row.get("_supportCardRankGroup") or 0)
+        rank_rows = sorted(
+            (
+                entry
+                for entry in tables.get("support_ranks", [])
+                if int(entry.get("_group") or 0) == rank_group
+            ),
+            key=lambda entry: int(entry.get("_rank") or 0),
+        )
+        if not rank_rows:
+            return SupportGrowth(
+                max_level=curve_max,
+                max_rank=0,
+                support_skill_level=1,
+                gekisou_skill_level=1,
+            )
+        last_rank = rank_rows[-1]
+        return SupportGrowth(
+            max_level=min(int(last_rank.get("_limitLevel") or curve_max), curve_max),
+            max_rank=int(last_rank.get("_rank") or 0),
+            support_skill_level=int(last_rank.get("_supportSkill01Level") or 1),
+            gekisou_skill_level=int(last_rank.get("_gekisouSupportSkill01Level") or 1),
+        )
 
 
 def catalog_stats(dataset: Dataset) -> dict[str, Any]:

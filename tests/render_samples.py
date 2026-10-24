@@ -7,16 +7,15 @@ Usage (from the plugin directory):
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from bdon.chart import load_score  # noqa: E402
 from bdon.constants import (  # noqa: E402
     BROWSE_KINDS,
     BROWSE_LIMIT,
@@ -33,7 +32,7 @@ from bdon.constants import (  # noqa: E402
 )
 from bdon.masterdata import MasterDataManager  # noqa: E402
 from bdon.models import catalog_stats  # noqa: E402
-from bdon.render import AstrBotRenderService, PageRenderer  # noqa: E402
+from bdon.render import PageRenderer, RenderService  # noqa: E402
 from bdon.search import resolve  # noqa: E402
 
 T2I_ENDPOINT = os.environ.get(
@@ -48,9 +47,16 @@ KIND_ACCENTS = {
     "comic": "#FF8899",
     "event": "#E05A7A",
     "catalog": "#0072C2",
+    "help": "#4C9DF0",
 }
 OUTPUT = ROOT / "tests" / "output"
 DATA = ROOT / "tests" / ".data"
+# ``BDON_SAMPLES_ONLY=song_detail,card_detail`` re-renders just those samples.
+ONLY = {
+    part.strip()
+    for part in os.environ.get("BDON_SAMPLES_ONLY", "").split(",")
+    if part.strip()
+}
 
 
 def base_context(
@@ -107,35 +113,11 @@ async def main(region: str) -> None:
         "comics",
     )
 
-    async def builtin_html_render(
-        tmpl, data, return_url=True, options=None, umo=None
-    ) -> str:
-        """Mimics AstrBot's Star.html_render -> network t2i protocol."""
-        payload = {
-            "tmpl": tmpl,
-            "json": return_url,
-            "tmpldata": data,
-            "options": options or {},
-        }
-
-        def post() -> tuple[bytes, str]:
-            request = urllib.request.Request(
-                f"{T2I_ENDPOINT}/generate",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(request, timeout=240) as response:
-                return response.read(), response.headers.get("Content-Type", "")
-
-        raw, content_type = await asyncio.to_thread(post)
-        suffix = ".jpg" if "jpeg" in content_type else ".png"
-        path = OUTPUT / f"sample-{datetime.now():%H%M%S%f}{suffix}"
-        path.write_bytes(raw)
-        return str(path)
-
+    # Use the plugin's own HTTP render path (the same endpoint contract as
+    # AstrBot's t2i fallback) instead of bespoke network code in this tool.
     renderer = PageRenderer(
         ROOT / "bdon" / "templates",
-        AstrBotRenderService(builtin_html_render, timeout=120),
+        RenderService(T2I_ENDPOINT, OUTPUT, timeout=240),
     )
 
     async def render(
@@ -146,6 +128,8 @@ async def main(region: str) -> None:
         image_type: str = "png",
         scale: str | None = LIST_SCALE,
     ):
+        if ONLY and name not in ONLY:
+            return None
         path = Path(
             await renderer.render(
                 template,
@@ -199,7 +183,115 @@ async def main(region: str) -> None:
     ctx = base_context(manager, region, "查歌 · 歌曲详情", song.band_color)
     ctx["song"] = song
     ctx["item"] = song
+    song_chart = DATA / "charts" / "chart_0001_0001_03.json"
+    if song_chart.is_file():
+        score = load_score(song_chart.read_bytes())
+        bpm_min, bpm_max = score.bpm_range()
+        seconds = max(0.0, score.position(score.max_tick())[2] / 1000.0)
+        difficulty = song.difficulties[-1] if song.difficulties else None
+        nps = difficulty.notes / seconds if difficulty is not None and seconds > 0 else None
+        ctx["metrics"] = {
+            "difficulty_label": difficulty.label if difficulty is not None else "EX",
+            "bpm_label": f"{bpm_min:g}" if bpm_min == bpm_max else f"{bpm_min:g}–{bpm_max:g}",
+            "duration_label": f"{int(seconds) // 60}:{int(seconds) % 60:02d}",
+            "bars": score.position(score.max_tick())[0] + 1,
+            "nps": f"{nps:.2f}" if nps is not None else None,
+        }
     await render("song_detail", "song_detail.html", ctx)
+
+    # 2D chart sheets (查谱面), rendered from bundled score fixtures so the
+    # samples stay reproducible offline (live charts come from assets.bdon.moe).
+    from bdon.chartsheet import build_sheet  # noqa: E402
+    from bdon.constants import DIFFICULTY_NAMES  # noqa: E402
+
+    fixture = DATA / "charts" / "chart_0001_0001_03.json"
+
+    def chart_context(chart_song, difficulty, path: Path):
+        credits = []
+        if chart_song.lyricist:
+            credits.append(f"作词 {chart_song.lyricist}")
+        if chart_song.composer:
+            credits.append(f"作曲 {chart_song.composer}")
+        if chart_song.arranger:
+            credits.append(f"编曲 {chart_song.arranger}")
+        sheet = build_sheet(load_score(path.read_bytes()))
+        ctx = base_context(
+            manager, region, "查谱面", difficulty.color,
+            page_width=sheet["page_width"],
+        )
+        ctx.update(
+            song=chart_song,
+            difficulty=difficulty,
+            difficulty_name=DIFFICULTY_NAMES.get(difficulty.key, difficulty.label),
+            sheet=sheet,
+            prefix="",
+            credit_line=" · ".join(credits),
+        )
+        return ctx
+
+    if fixture.is_file():
+        chart_song = next(
+            (s for s in dataset.songs if s.display_id == 1), dataset.songs[0]
+        )
+        expert = next((d for d in chart_song.difficulties if d.key == "expert"), None)
+        if expert is not None:
+            context = chart_context(chart_song, expert, fixture)
+            await render(
+                "chart_ex",
+                "chart_preview.html",
+                context,
+                width=context["page_width"],
+                image_type="jpeg",
+                scale=LIST_SCALE,
+            )
+        easy = next((d for d in chart_song.difficulties if d.key == "easy"), None)
+        easy_fixture = DATA / "charts" / "chart_0001_0001_00.json"
+        if easy is not None and easy_fixture.is_file():
+            context = chart_context(chart_song, easy, easy_fixture)
+            await render(
+                "chart_ez",
+                "chart_preview.html",
+                context,
+                width=context["page_width"],
+                image_type="jpeg",
+                scale=LIST_SCALE,
+            )
+        # A longer chart renders wider, never taller: 17 columns at the same
+        # fixed sheet height.
+        dense_fixture = DATA / "charts" / "chart_0050_0050_03.json"
+        dense_song = next((s for s in dataset.songs if s.display_id == 50), None)
+        if dense_song is not None and dense_fixture.is_file():
+            dense = next(
+                (d for d in dense_song.difficulties if d.key == "expert"),
+                dense_song.difficulties[-1],
+            )
+            context = chart_context(dense_song, dense, dense_fixture)
+            await render(
+                "chart_dense",
+                "chart_preview.html",
+                context,
+                width=context["page_width"],
+                image_type="jpeg",
+                scale=LIST_SCALE,
+            )
+        # Near-overlapping notes raise px/beat instead of dropping notes; this
+        # chart is taller than the others but still one complete image.
+        spaced_fixture = DATA / "charts" / "chart_0114_0114_03.json"
+        spaced_song = next((s for s in dataset.songs if s.display_id == 114), None)
+        if spaced_song is not None and spaced_fixture.is_file():
+            spaced = next(
+                (d for d in spaced_song.difficulties if d.key == "expert"),
+                spaced_song.difficulties[-1],
+            )
+            context = chart_context(spaced_song, spaced, spaced_fixture)
+            await render(
+                "chart_spacing",
+                "chart_preview.html",
+                context,
+                width=context["page_width"],
+                image_type="jpeg",
+                scale=LIST_SCALE,
+            )
 
     ctx = base_context(manager, region, "查歌", KIND_ACCENTS["song"])
     ctx["query"] = ""
@@ -212,6 +304,13 @@ async def main(region: str) -> None:
     ctx["item"] = card
     await render("card_detail", "card_detail.html", ctx)
 
+    # A lower-rarity card has a shorter level cap and one skill slot fewer.
+    plain_card = min(dataset.cards, key=lambda card: card.rarity)
+    ctx = base_context(manager, region, "查卡 · 卡牌详情", plain_card.band_color)
+    ctx["card"] = plain_card
+    ctx["item"] = plain_card
+    await render("card_detail_r", "card_detail.html", ctx)
+
     ctx = base_context(manager, region, "查卡", KIND_ACCENTS["card"])
     ctx["query"] = ""
     await render_list("card_list", "card_list.html", ctx, "card", dataset.cards)
@@ -222,6 +321,22 @@ async def main(region: str) -> None:
     ctx["support"] = support
     ctx["item"] = support
     await render("support_detail", "support_detail.html", ctx)
+
+    # Another card to check a gekisou support skill and its level table.
+    gekisou_support = next(
+        (
+            entry
+            for entry in dataset.supports
+            if any(skill.label.startswith("激奏支援") for skill in entry.skills)
+        ),
+        support,
+    )
+    ctx = base_context(
+        manager, region, "查支援卡 · 详情", gekisou_support.band_color
+    )
+    ctx["support"] = gekisou_support
+    ctx["item"] = gekisou_support
+    await render("support_detail_g", "support_detail.html", ctx)
 
     ctx = base_context(manager, region, "查支援卡", KIND_ACCENTS["support"])
     ctx["query"] = ""
@@ -320,6 +435,10 @@ async def main(region: str) -> None:
     ctx = base_context(manager, region, "查歌 · 不存在的歌", KIND_ACCENTS["song"])
     ctx["query"] = "不存在的歌zzz"
     await render_list("song_empty", "song_list.html", ctx, "song", dataset.songs)
+
+    # Help / command guide (static content, no dataset needed)
+    ctx = base_context(manager, region, "帮助", KIND_ACCENTS["help"])
+    await render("help", "help.html", ctx, image_type="jpeg", scale=LIST_SCALE)
 
 
 if __name__ == "__main__":

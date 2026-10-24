@@ -14,7 +14,7 @@
 </header>
 
 {% if resolved.items %}
-<div class="list-grid" style="--card-w:216px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
+<div class="list-grid" style="--card-w:250px;--card-width:calc({{ (100 / columns) | round(4) }}% - {{ (((columns - 1) * 14 / columns) | round(2)) + 0.1 }}px)">
   {% for song in resolved.items %}
   <div class="item-card">
     <div class="item-cover square">

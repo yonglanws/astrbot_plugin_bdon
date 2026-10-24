@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% from "_macros.html" import section_title %}
+
+{# Help content lives here so the font subset builder sees every glyph. #}
+{% set help_groups = [
+  {
+    "title": "资料查询",
+    "sub": "关键词、别名或 ID 都能搜",
+    "accent": "#4C9DF0",
+    "items": [
+      {
+        "icon": "♪",
+        "command": "查歌",
+        "aliases": ["查曲", "查歌曲", "歌曲", "song", "music", "看歌", "看歌曲"],
+        "desc": "按歌名、角色、乐队、作曲或 ID 查询；详情含曲绘、EZ–EX 难度与物量、BPM、时长、小节数、谱面密度与激奏任务。不带关键词时展示最近 20 首。",
+        "examples": ["查歌 迷星叫", "查歌 1"]
+      },
+      {
+        "icon": "▣",
+        "command": "查卡",
+        "aliases": ["查牌", "查卡牌", "查卡面", "看卡", "看卡面"],
+        "desc": "按卡名、角色、乐队或 ID 查询；详情含卡面、稀有度、属性、满觉醒综合力、等级上限与 Lv.1–5 技能。不带关键词时展示最近 20 张。",
+        "examples": ["查卡 高松灯", "查卡 64"]
+      },
+      {
+        "icon": "◈",
+        "command": "查支援卡",
+        "aliases": ["查支援", "查snap", "看支援卡"],
+        "desc": "按卡名、角色或 ID 查询；详情含 Snap 卡面、等级上限与界限突破、留影故事，以及支援 / 激奏支援技能 Lv.1–5。",
+        "examples": ["查支援卡 好想成为人类", "查支援卡 12"]
+      },
+      {
+        "icon": "✧",
+        "command": "查贴纸",
+        "aliases": ["查貼紙", "查貼圖", "查表情", "查表情包"],
+        "desc": "按贴纸名、角色或 ID 查询；单条结果直接发送 PNG 原图，多条结果展示贴纸列表。",
+        "examples": ["查贴纸 灯", "查贴纸 12"]
+      },
+      {
+        "icon": "▤",
+        "command": "查漫画",
+        "aliases": ["查漫畫", "查四格"],
+        "desc": "加载画面的四格漫画；单条结果直接发送原图，多条结果展示列表。",
+        "examples": ["查漫画 高松灯", "查漫画 12"]
+      },
+      {
+        "icon": "✦",
+        "command": "查活动",
+        "aliases": ["活动", "event"],
+        "desc": "活动期间、活动歌曲、加成卡牌、点数奖励与 Live 报酬；不带关键词时展示当前活动。",
+        "examples": ["查活动", "查活动 3"]
+      }
+    ]
+  },
+  {
+    "title": "原图与谱面",
+    "sub": "单张图片直发，不套详情页",
+    "accent": "#5B6BD6",
+    "items": [
+      {
+        "icon": "◎",
+        "command": "查曲绘",
+        "aliases": ["曲绘"],
+        "desc": "输入歌曲 ID 或唯一匹配的歌名，直接发送曲绘原图；匹配到多首时返回歌曲列表供选择。",
+        "examples": ["查曲绘 迷星叫", "查曲绘 1"]
+      },
+      {
+        "icon": "○",
+        "command": "card / scard",
+        "aliases": ["卡面", "支援卡面"],
+        "badge": "原图直发",
+        "desc": "直接返回成员卡面或支援卡原图，不渲染详情页；支持区服前缀，例如 jp card 64。",
+        "examples": ["card 64", "scard 12"]
+      },
+      {
+        "icon": "♫",
+        "command": "查谱面",
+        "aliases": ["查谱", "谱面", "谱面预览", "谱面查询", "铺面", "铺面预览"],
+        "wide": true,
+        "desc": "把指定难度渲染成 2D 谱面预览：固定高度、整谱一图，默认 EX，可指定 EZ / NM / HD / EX；标注 BPM、拍号、SKILL / CALL 与 Fever 段，时间从下往上读。",
+        "examples": ["查谱面 迷星叫", "查谱面 1 hd"]
+      }
+    ]
+  },
+  {
+    "title": "资料与帮助",
+    "sub": "总览、活动归档与指令说明",
+    "accent": "#2FA46B",
+    "items": [
+      {
+        "icon": "※",
+        "command": "查图鉴",
+        "aliases": ["图鉴", "圖鑑"],
+        "wide": true,
+        "desc": "当前区服的收录总数、乐队与稀有度分布、最新收录；也可接「歌曲 / 卡牌 / 支援卡 / 贴纸 / 漫画 / 活动」直接查看对应列表。单独使用「图鉴」需加区服前缀。",
+        "examples": ["查图鉴", "查图鉴 活动"]
+      },
+      {
+        "icon": "☆",
+        "command": "活动一览",
+        "aliases": ["活动列表", "活動一覽"],
+        "desc": "按开放时间倒序展示全部活动，并标注进行中 / 即将开始 / 已结束。",
+        "examples": ["活动一览", "jp活动一览"]
+      },
+      {
+        "icon": "?",
+        "command": "帮助",
+        "aliases": ["help", "说明", "說明"],
+        "desc": "查看本帮助页。",
+        "examples": ["帮助", "help"]
+      }
+    ]
+  }
+] %}
+
+{% block styles %}
+  /* ---- hero ---- */
+  .help-hero{
+    position:relative;overflow:hidden;margin-top:2px;padding:30px 34px 26px;
+    border-radius:var(--radius-xl);color:#fff;
+    box-shadow:0 16px 38px color-mix(in srgb,var(--accent) 26%, transparent);
+    background:
+      radial-gradient(circle at 88% -12%, rgba(255,255,255,.30), transparent 44%),
+      radial-gradient(circle at 4% 110%, rgba(255,255,255,.14), transparent 38%),
+      linear-gradient(135deg,color-mix(in srgb,var(--accent) 86%, #17181a),color-mix(in srgb,var(--accent) 48%, #4c9df0));
+  }
+  .help-hero::after{
+    content:"?";position:absolute;right:38px;top:-26px;
+    font-size:170px;font-weight:700;line-height:1;opacity:.10;
+  }
+  .help-kicker{font-size:14px;letter-spacing:.2em;font-weight:600;opacity:.85}
+  .help-title{font-size:38px;font-weight:600;line-height:1.2;margin:8px 0 0;letter-spacing:.2px}
+  .help-intro{font-size:17.5px;line-height:1.65;margin:12px 0 0;max-width:840px;opacity:.94}
+  .help-intro b{font-weight:600}
+  .format-bar{
+    display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:20px;
+    padding:13px 16px;border-radius:14px;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);
+  }
+  .format-label{font-size:14px;letter-spacing:.14em;opacity:.78;font-weight:600}
+  .format-slot{font-size:17px;font-weight:600;padding:3px 12px;border-radius:9px;background:rgba(255,255,255,.16);border:1px dashed rgba(255,255,255,.46)}
+  .format-slot.is-solid{background:#fff;border-style:solid;color:color-mix(in srgb,var(--accent) 82%, #17181a)}
+  .format-arrow{font-size:16px;opacity:.65}
+  .format-tip{margin-left:auto;font-size:15.5px;opacity:.94}
+  .format-tip b{font-weight:600;font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace}
+  .region-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .region-chips span{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:999px;background:rgba(16,20,26,.18);border:1px solid rgba(255,255,255,.22);font-size:14.5px}
+  .region-chips b{font-weight:600;font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace;letter-spacing:.2px}
+  /* ---- command cards ---- */
+  .cmd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .cmd-card{
+    background:var(--surface);border:1px solid var(--outline);
+    border-top:3px solid color-mix(in srgb,var(--cmd) 55%, #ffffff);
+    border-radius:var(--radius-lg);padding:16px 18px 15px;box-shadow:var(--shadow-soft);min-width:0;
+  }
+  .cmd-card.wide{grid-column:1/-1}
+  .cmd-head{display:flex;align-items:center;gap:11px}
+  .cmd-icon{
+    width:40px;height:40px;flex:0 0 40px;display:grid;place-items:center;border-radius:11px;
+    font-size:20px;line-height:1;background:color-mix(in srgb,var(--cmd) 13%, #ffffff);
+    color:color-mix(in srgb,var(--cmd) 80%, #17181a);
+  }
+  .cmd-name{font-size:22px;font-weight:600;letter-spacing:.2px;font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace}
+  .cmd-badge{margin-left:auto;font-size:13px;font-weight:600;color:var(--faint);background:var(--surface-2);border:1px solid var(--outline-soft);border-radius:999px;padding:3px 10px;white-space:nowrap}
+  .cmd-alias{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .alias-chip{font-size:14px;color:var(--muted);background:var(--surface-2);border:1px solid var(--outline-soft);border-radius:7px;padding:2px 8px;font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace}
+  .cmd-desc{font-size:16.5px;line-height:1.62;color:var(--muted);margin:10px 0 0}
+  .cmd-desc b{color:var(--text);font-weight:600}
+  .cmd-example{font-size:15px;color:color-mix(in srgb,var(--cmd) 74%, #17181a);margin-top:10px;font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace}
+  .cmd-example b{font-weight:600}
+  /* ---- tips ---- */
+  .tip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px}
+  .tip{display:flex;align-items:flex-start;gap:9px;background:var(--surface);border:1px solid var(--outline-soft);border-radius:var(--radius-md);padding:12px 15px;box-shadow:var(--shadow-soft);min-width:0}
+  .tip-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 8px;margin-top:8px}
+  .tip p{font-size:16px;line-height:1.62;color:var(--muted);margin:0}
+  .cmd-code{font-family:"SFMono-Regular",Consolas,"Noto Sans Mono",monospace;font-size:.94em;padding:1px 6px;border-radius:6px;background:var(--surface-2);border:1px solid var(--outline-soft);color:var(--text);white-space:nowrap}
+  /* ---- credit ---- */
+  .credit-strip{
+    display:flex;align-items:flex-start;gap:12px;margin-top:18px;padding:16px 20px;
+    border-radius:var(--radius-lg);border:1px solid color-mix(in srgb,#4C9DF0 18%, #ffffff);
+    background:linear-gradient(90deg,color-mix(in srgb,#4C9DF0 9%, #ffffff),color-mix(in srgb,#705399 8%, #ffffff));
+  }
+  .credit-mark{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,#4C9DF0 16%, #ffffff);color:#3d4a70;font-size:17px;line-height:1}
+  .credit-strip p{margin:0;font-size:15.5px;line-height:1.7;color:#3d4a70}
+  .credit-strip b{font-weight:600;color:#1E2937}
+{% endblock %}
+
+{% block content %}
+<section class="help-hero">
+  <div class="help-kicker">OUR NOTES · 指令指南</div>
+  <h1 class="help-title">邦多利 Our Notes 使用指南</h1>
+  <p class="help-intro">直接发送指令即可查询，不需要斜杠。不带区服前缀时默认 <b>cn</b>：港台服数据、简体中文。单条结果直接给出图片，多条结果返回列表，所有列表都不分页。</p>
+  <div class="format-bar">
+    <span class="format-label">指令格式</span>
+    <span class="format-slot">区服前缀</span>
+    <span class="format-arrow">+</span>
+    <span class="format-slot is-solid">指令</span>
+    <span class="format-arrow">+</span>
+    <span class="format-slot">关键词 / ID</span>
+    <span class="format-tip">例如 <b>{{ region_prefix }}查歌 迷星叫</b></span>
+  </div>
+  <div class="region-chips">
+    <span><b>默认 / cn</b> 港台服 · 简体</span>
+    <span><b>tw / hk</b> 港台服 · 繁体</span>
+    <span><b>jp</b> 日服 · 日文</span>
+    <span><b>kr</b> 韩服 · 繁体文本</span>
+    <span><b>en</b> 国际服 · 繁体文本</span>
+  </div>
+</section>
+
+{% for group in help_groups %}
+{{ section_title(group.title, group.sub) }}
+<div class="cmd-grid">
+  {% for item in group["items"] %}
+  <article class="cmd-card{% if item.wide %} wide{% endif %}" style="--cmd:{{ group.accent }}">
+    <div class="cmd-head">
+      <span class="cmd-icon">{{ item.icon }}</span>
+      <span class="cmd-name">{{ item.command }}</span>
+      {% if item.badge %}<span class="cmd-badge">{{ item.badge }}</span>{% endif %}
+    </div>
+    {% if item.aliases %}
+    <div class="cmd-alias">
+      {% for alias in item.aliases %}<span class="alias-chip">{{ alias }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    <p class="cmd-desc">{{ item.desc }}</p>
+    <div class="cmd-example">例 <b>{{ item.examples | join(' · ') }}</b></div>
+  </article>
+  {% endfor %}
+</div>
+{% endfor %}
+
+{{ section_title('搜索技巧', '关键词怎么写都能搜到') }}
+<div class="tip-grid">
+  <div class="tip"><span class="tip-dot"></span><p>区服前缀可连写或加空格：<span class="cmd-code">jp查歌</span> 与 <span class="cmd-code">jp 查歌</span> 等价；不带前缀默认 <span class="cmd-code">cn</span>（港台服 · 简体）。</p></div>
+  <div class="tip"><span class="tip-dot"></span><p>关键词支持简繁日英韩与数字 ID，社区角色别名（<span class="cmd-code">灯</span> / <span class="cmd-code">tomori</span> / <span class="cmd-code">rana</span>）也能搜到。</p></div>
+  <div class="tip"><span class="tip-dot"></span><p>多个关键词用空格分隔，会同时匹配标题、角色、乐队等字段；列表里的 <span class="cmd-code">#ID</span> 可以直接拿来查询。</p></div>
+  <div class="tip"><span class="tip-dot"></span><p>列表不分页；<span class="cmd-code">查歌</span> / <span class="cmd-code">查卡</span> 不带关键词只展示最近 20 条，输入关键词即可搜索全部内容。</p></div>
+  <div class="tip"><span class="tip-dot"></span><p>单条结果直接出图：<span class="cmd-code">查贴纸</span>、<span class="cmd-code">查漫画</span>、<span class="cmd-code">查曲绘</span>、<span class="cmd-code">card</span> / <span class="cmd-code">scard</span>。</p></div>
+  <div class="tip"><span class="tip-dot"></span><p>谱面时间从下往上、从左往右读；列数随歌曲长度自动增加，整首谱面始终在一张图里。</p></div>
+</div>
+
+<div class="credit-strip">
+  <span class="credit-mark">★</span>
+  <p>本项目的谱面解析与排版参考了 <b>luoxiadesu/moenotes-chart-renderer</b>（MIT），技能数值文案参考了 <b>MoeNotes</b>（StarMoe-org/moenotes）的开源项目，特此致谢。MasterData 与游戏素材来自 moenotes-masterdata 与 assets.bdon.moe，版权归原作者与游戏权利方所有。</p>
+</div>
+{% endblock %}

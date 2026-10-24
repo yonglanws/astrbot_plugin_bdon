@@ -7,10 +7,14 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any
 
+import aiohttp
+
+from .assets import is_public_http_url
 from .constants import (
     ALL_TABLES,
     DEFAULT_DATA_SOURCES,
@@ -19,11 +23,6 @@ from .constants import (
     SCRIPT_TEXT_FIELDS,
 )
 from .models import Dataset, DatasetBuilder
-
-try:  # AstrBot ships aiohttp; the fallback keeps the module importable in tests.
-    import aiohttp
-except ImportError:  # pragma: no cover
-    aiohttp = None  # type: ignore[assignment]
 
 logger = logging.getLogger("astrbot")
 
@@ -364,23 +363,15 @@ class MasterDataManager:
         raise MasterDataError("; ".join(errors[-2:]) or "no source available")
 
     async def _fetch_bytes(self, url: str) -> bytes:
+        if not is_public_http_url(url):
+            raise MasterDataError(f"拒绝非公网数据源：{url}")
         headers = {
             "User-Agent": "astrbot-plugin-bdon/1.0 (+https://github.com/StarMoe-org/moenotes)",
             "Accept": "application/json,*/*",
         }
-        if aiohttp is not None:
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        raise MasterDataError(f"HTTP {response.status}")
-                    return await response.read()
-        # Standard-library fallback for environments without aiohttp.
-        import urllib.request
-
-        def fetch() -> bytes:
-            request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return response.read()
-
-        return await asyncio.to_thread(fetch)
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise MasterDataError(f"HTTP {response.status}")
+                return await response.read()

@@ -1,6 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import img, picture, attr_chip, band_pill, rarity_badge, rarity_mark, power_row, section_title %}
-{% set max_power = ([card.performance, card.technic, card.visual] | max) or 1 %}
+{% from "_macros.html" import img, picture, attr_chip, band_pill, rarity_badge, rarity_mark, power_row, section_title, skill_card %}
+{% set perf = card.growth.performance if card.growth else card.performance %}
+{% set tech = card.growth.technic if card.growth else card.technic %}
+{% set vis = card.growth.visual if card.growth else card.visual %}
+{% set total = card.growth.total_power if card.growth else card.total_power %}
+{% set max_power = ([perf, tech, vis] | max) or 1 %}
 {% block content %}
 <div class="detail-grid">
   <div class="detail-media">
@@ -27,15 +31,35 @@
 
     <div class="divider"></div>
     <div class="stat-grid">
-      <div class="stat"><div class="stat-label">综合力</div><div class="stat-value">{{ card.total_power | num }}</div></div>
-      <div class="stat"><div class="stat-label">稀有度</div><div class="stat-value">{{ card.rarity_label }}</div></div>
-      <div class="stat"><div class="stat-label">属性</div><div class="stat-value" style="color:{{ card.type_color }}">{{ card.type_label }}</div></div>
+      <div class="stat">
+        <div class="stat-label">满觉醒综合力</div>
+        <div class="stat-value">{{ total | num }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">等级上限</div>
+        <div class="stat-value">{% if card.growth %}Lv.{{ card.growth.max_level }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">特训 / 觉醒</div>
+        <div class="stat-value">{% if card.growth %}{{ card.growth.max_awake }}<small> / {{ card.growth.max_rank }}</small>{% else %}—{% endif %}</div>
+      </div>
     </div>
 
     <div class="divider"></div>
-    {{ power_row('表演', card.performance, max_power, card.type_color) }}
-    {{ power_row('技巧', card.technic, max_power, card.type_color) }}
-    {{ power_row('视觉', card.visual, max_power, card.type_color) }}
+    {{ power_row('表演', perf, max_power, card.type_color) }}
+    {{ power_row('技巧', tech, max_power, card.type_color) }}
+    {{ power_row('视觉', vis, max_power, card.type_color) }}
+    {% if card.growth %}
+    <div class="power-note">
+      基础满级综合力 <b>{{ card.total_power | num }}</b>，满特训 + 满觉醒后 <b>{{ total | num }}</b>；队长技能上限 Lv.{{ card.growth.leader_skill_level }}。
+    </div>
+    <div class="growth-strip">
+      <div class="growth-item"><div class="growth-label">卡牌等级</div><div class="growth-value">Lv.1<small> → Lv.{{ card.growth.max_level }}</small></div></div>
+      <div class="growth-item"><div class="growth-label">特训</div><div class="growth-value">{{ card.growth.max_awake }}<small>阶</small></div></div>
+      <div class="growth-item"><div class="growth-label">觉醒</div><div class="growth-value">{{ card.growth.max_rank }}<small>阶</small></div></div>
+      <div class="growth-item"><div class="growth-label">技能等级</div><div class="growth-value">Lv.1<small> → Lv.5</small></div></div>
+    </div>
+    {% endif %}
 
     <div class="identity-row">
       <span class="char-chip">
@@ -43,20 +67,15 @@
         <span>{{ card.character_name }}</span>
       </span>
       {{ band_pill(card.band_name, card.band_color) }}
+      <span class="chip mono">素材 #{{ card.asset_id }}</span>
     </div>
   </div>
 </div>
 
 {% if card.skills %}
-{{ section_title('技能详情', '队长 · Live · 激奏') }}
-<div class="skill-grid">
-  {% for skill in card.skills %}
-  <div class="skill-card">
-    <div class="skill-label">{{ skill.label }}</div>
-    <div class="skill-name">{{ skill.name }}</div>
-    {% if skill.description %}<div class="skill-desc">{{ skill.description }}</div>{% endif %}
-  </div>
-  {% endfor %}
+{{ section_title('技能详情', '等级 1–5 的完整数值') }}
+<div class="skill-stack">
+  {% for skill in card.skills %}{{ skill_card(skill) }}{% endfor %}
 </div>
 {% endif %}
 {% endblock %}

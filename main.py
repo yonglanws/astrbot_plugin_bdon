@@ -12,12 +12,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import aiohttp
 from astrbot.api import logger
-
-try:
-    import aiohttp
-except ImportError:  # pragma: no cover - aiohttp ships with AstrBot
-    aiohttp = None  # type: ignore[assignment]
 
 try:
     from astrbot.api import AstrBotConfig
@@ -27,14 +23,20 @@ except ImportError:  # older AstrBot releases type the config as a plain dict
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 
+from .bdon.assets import AssetBuilder, is_public_http_url
+from .bdon.chart import ChartError, Score, load_score
+from .bdon.chartsheet import build_sheet
 from .bdon.constants import (
     ART_COMMANDS,
     BROWSE_KINDS,
     BROWSE_LIMIT,
+    CHART_DIFFICULTY_WORDS,
     COMMAND_ALIASES,
     DEFAULT_ASSET_BASE,
     DEFAULT_DATA_SOURCES,
     DETAIL_WIDTH,
+    DIFFICULTIES,
+    DIFFICULTY_NAMES,
     EVENT_WIDTH,
     KIND_COMMANDS,
     KIND_LABELS,
@@ -56,16 +58,17 @@ from .bdon.models import catalog_stats
 from .bdon.render import AstrBotRenderService, PageRenderer, RenderError, RenderService
 from .bdon.search import Resolved, resolve
 
-
 KIND_ACCENTS = {
     "song": "#4C9DF0",
     "card": "#B86BD8",
     "support": "#3DBFA0",
     "stamp": "#D9A441",
     "comic": "#FF8899",
+    "chart": "#3E53A8",
     "event": "#E05A7A",
     "event_list": "#E05A7A",
     "catalog": "#0072C2",
+    "help": "#4C9DF0",
 }
 
 CATALOG_SUBKINDS = {
@@ -146,6 +149,12 @@ def _as_int(value: Any, default: int) -> int:
         return default
 
 
+def _format_number(value: float) -> str:
+    """``190.0`` -> ``190``; keeps a genuine fraction."""
+    rounded = round(float(value), 2)
+    return str(int(rounded)) if rounded.is_integer() else f"{rounded:g}"
+
+
 class BdonPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -155,6 +164,10 @@ class BdonPlugin(Star):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.image_dir = self.data_dir / "images"
         self.image_dir.mkdir(parents=True, exist_ok=True)
+        # Score JSON files are tiny and never change once published, so they are
+        # cached separately from the (size-limited) image cache.
+        self.chart_dir = self.data_dir / "charts"
+        self.chart_dir.mkdir(parents=True, exist_ok=True)
 
         sources = self.config.get("data_source_bases") or list(DEFAULT_DATA_SOURCES)
         if not isinstance(sources, list):
@@ -261,6 +274,22 @@ class BdonPlugin(Star):
         region, script = resolve_region(region_prefix)
         event.stop_event()
 
+        # The help page describes every command and the region prefixes; it
+        # needs no MasterData, so it renders even before the first sync.
+        if kind == "help":
+            try:
+                path = await self._render_help(region, script, region_prefix)
+            except RenderError as exc:
+                logger.warning("[bdon] help render failed: %s", exc)
+                yield event.plain_result(f"帮助页渲染失败：{exc}")
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[bdon] help render failed")
+                yield event.plain_result(f"帮助页渲染失败：{exc}")
+                return
+            yield event.image_result(str(path))
+            return
+
         if art_kind is not None:
             async for result in self._handle_art(
                 event, region, script, region_prefix, art_kind, args
@@ -280,6 +309,20 @@ class BdonPlugin(Star):
             yield event.plain_result(
                 f"{profile.label} 数据暂不可用：{exc}\n请稍后重试，或让管理员发送「同步数据」。"
             )
+            return
+
+        if kind == "chart":
+            async for result in self._handle_chart(
+                event, region, script, region_prefix, dataset, args
+            ):
+                yield result
+            return
+
+        if kind == "jacket":
+            async for result in self._handle_jacket(
+                event, region, script, region_prefix, dataset, args
+            ):
+                yield result
             return
 
         try:
@@ -332,6 +375,292 @@ class BdonPlugin(Star):
         for key, (ok, message) in results.items():
             lines.append(f"{'✓' if ok else '✗'} {REGIONS[key].label}：{message}")
         yield event.plain_result("同步完成\n" + "\n".join(lines))
+
+    # -- 2D chart preview ------------------------------------------------------
+    @staticmethod
+    def _parse_chart_args(args: str) -> tuple[str, str | None]:
+        """Splits ``[歌曲名/ID] [难度]`` into ``(query, difficulty)``.
+
+        Difficulty words are EZ/NM/HD/EX (and Chinese equivalents); bare digits
+        name the song, so ``查谱面 3`` is song #3. A second digit after the song
+        ID reads as the difficulty number (``查谱面 1 4`` = song 1, expert).
+        """
+        tokens = [
+            token
+            for token in re.split(r"\s+", unicodedata.normalize("NFKC", args or "").strip())
+            if token
+        ]
+        difficulty: str | None = None
+        names: list[str] = []
+        for token in tokens:
+            if token.isdigit():
+                continue
+            key = CHART_DIFFICULTY_WORDS.get(token.lower())
+            if key:
+                difficulty = key
+            else:
+                names.append(token.lstrip("#＃"))
+        digits = [token.lstrip("#＃") for token in tokens if token.isdigit()]
+        if difficulty is None and len(digits) >= 2:
+            difficulty = CHART_DIFFICULTY_WORDS.get(digits[1])
+        query_parts = names + digits[:1]
+        return " ".join(query_parts), difficulty
+
+    async def _handle_chart(
+        self,
+        event: AstrMessageEvent,
+        region: str,
+        script: str,
+        region_prefix: str,
+        dataset: Any,
+        args: str,
+    ):
+        """``查谱面``: renders one difficulty's chart as a 2D sheet image."""
+        prefix = _display_prefix(region_prefix)
+        query, difficulty_key = self._parse_chart_args(args)
+        if not query:
+            yield event.plain_result(
+                f"用法：{prefix}查谱面 歌曲名/ID [EZ|NM|HD|EX]（默认 EX，"
+                f"例如 {prefix}查谱面 迷星叫 ex）。"
+            )
+            return
+
+        songs = dataset.items_for("song")
+        resolved = resolve(songs, query, page_size=LIST_PAGE_SIZE, kind="song")
+        song = None
+        if resolved.mode == "detail" and resolved.item is not None:
+            song = resolved.item
+        elif resolved.items:
+            if resolved.total > 1:
+                shown = resolved.items[:10]
+                listing = "、".join(
+                    f"{item.title_for_search} #{item.display_id}" for item in shown
+                )
+                more = f"……共 {resolved.total} 首" if resolved.total > len(shown) else ""
+                yield event.plain_result(
+                    f"匹配到 {resolved.total} 首歌：{listing}{more}\n"
+                    f"请用更准确的名字或 ID，例如 {prefix}查谱面 {shown[0].display_id} ex。"
+                )
+                return
+            song = resolved.items[0]
+        if song is None:
+            yield event.plain_result(f"没有找到匹配「{query}」的歌曲。")
+            return
+
+        difficulties = {d.key: d for d in song.difficulties if d.chart_key}
+        if not difficulties:
+            yield event.plain_result(
+                f"「{song.title_for_search}」#{song.display_id} 暂无谱面数据。"
+            )
+            return
+        wanted = difficulty_key or "expert"
+        if wanted not in difficulties:
+            wanted = next(
+                key for key, _, _, _ in reversed(DIFFICULTIES) if key in difficulties
+            )
+        difficulty = difficulties[wanted]
+
+        try:
+            score = await self._load_chart_score(region, script, difficulty.chart_key)
+        except ChartError as exc:
+            logger.warning("[bdon] chart parse failed for %s: %s", difficulty.chart_key, exc)
+            yield event.plain_result(f"谱面文件无法解析：{exc}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[bdon] chart download failed for %s: %s", difficulty.chart_key, exc)
+            yield event.plain_result(f"谱面文件下载失败：{exc}\n请稍后重试。")
+            return
+        if not score.notes:
+            yield event.plain_result(
+                f"「{song.title_for_search}」{difficulty.label} "
+                f"#{song.display_id} 的谱面数据还没有发布。"
+            )
+            return
+
+        credits = []
+        if song.lyricist:
+            credits.append(f"作词 {song.lyricist}")
+        if song.composer:
+            credits.append(f"作曲 {song.composer}")
+        if song.arranger:
+            credits.append(f"编曲 {song.arranger}")
+        # The sheet's width follows its column count (fixed height, wide image);
+        # the header stays on its usual 1080 px block at the top-left.
+        sheet = build_sheet(score)
+        context = self._base_context(
+            region,
+            script,
+            region_prefix,
+            KIND_COMMANDS["chart"],
+            difficulty.color,
+            page_width=sheet["page_width"],
+        )
+        context.update(
+            song=song,
+            difficulty=difficulty,
+            difficulty_name=DIFFICULTY_NAMES.get(difficulty.key, difficulty.label),
+            sheet=sheet,
+            prefix=prefix,
+            credit_line=" · ".join(credits),
+        )
+        try:
+            path = await self.renderer.render(
+                "chart_preview.html",
+                context,
+                width=sheet["page_width"],
+                image_type="jpeg",
+                quality=LIST_JPEG_QUALITY,
+                scale=LIST_SCALE,
+            )
+        except RenderError as exc:
+            logger.warning("[bdon] chart render failed: %s", exc)
+            yield event.plain_result(f"图片渲染失败：{exc}")
+            return
+        yield event.image_result(str(path))
+
+    async def _load_chart_score(
+        self,
+        region: str,
+        script: str,
+        chart_key: str,
+        timeout: int | None = None,
+    ) -> Score:
+        """Downloads (once) and parses the score JSON for one difficulty."""
+        builder = AssetBuilder(self.manager.asset_base, REGIONS[region], script)
+        label = f"{chart_key.rsplit('/', 1)[-1]}.json"
+        path = f"Live/MusicScore/{chart_key}"
+        urls = [url for url in (builder.url(path, label), builder.alternate(path, label)) if url]
+        failures = []
+        for url in urls:
+            data = await self._fetch_chart_json(url, timeout=timeout)
+            if data is None:
+                failures.append(url)
+                continue
+            return load_score(data)
+        raise RenderError(f"谱面服务没有返回数据（尝试 {len(failures)} 个地址）")
+
+    async def _fetch_chart_json(
+        self, url: str, timeout: int | None = None
+    ) -> bytes | None:
+        if not is_public_http_url(url):
+            logger.warning("[bdon] refusing non-public chart URL: %s", url)
+            return None
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+        cached = self.chart_dir / f"{digest}.json"
+        if cached.is_file() and cached.stat().st_size > 0:
+            try:
+                return cached.read_bytes()
+            except OSError:
+                pass
+        data = await self._download_image(url, timeout=timeout)
+        if not data:
+            return None
+        try:
+            temporary = cached.with_suffix(".json.part")
+            temporary.write_bytes(data)
+            temporary.replace(cached)
+        except OSError:
+            pass
+        return data
+
+    async def _song_metrics(
+        self, song: Any, region: str, script: str
+    ) -> dict[str, Any] | None:
+        """BPM / duration / density from the hardest chart, when it is reachable."""
+        difficulty = next(
+            (entry for entry in reversed(song.difficulties) if entry.chart_key), None
+        )
+        if difficulty is None:
+            return None
+        try:
+            # Song details should stay quick: a slow mirror only costs the
+            # extra metrics, never the page.
+            score = await self._load_chart_score(
+                region, script, difficulty.chart_key, timeout=15
+            )
+        except Exception as exc:  # noqa: BLE001 - optional data
+            logger.info("[bdon] chart metrics unavailable for %s: %s", song.id, exc)
+            return None
+        bpm_min, bpm_max = score.bpm_range()
+        duration_ms = score.position(score.max_tick())[2]
+        seconds = max(0.0, duration_ms / 1000.0)
+        bars = score.position(score.max_tick())[0] + 1
+        nps = difficulty.notes / seconds if seconds > 0 else None
+        return {
+            "difficulty_label": difficulty.label,
+            "bpm_label": (
+                _format_number(bpm_min)
+                if bpm_min == bpm_max
+                else f"{_format_number(bpm_min)}–{_format_number(bpm_max)}"
+            ),
+            "duration_label": f"{int(seconds) // 60}:{int(seconds) % 60:02d}",
+            "bars": bars,
+            "nps": f"{nps:.2f}" if nps is not None else None,
+        }
+
+    # -- jacket art ------------------------------------------------------------
+    async def _handle_jacket(
+        self,
+        event: AstrMessageEvent,
+        region: str,
+        script: str,
+        region_prefix: str,
+        dataset: Any,
+        args: str,
+    ):
+        """``查曲绘``: one hit sends the song's jacket, several the song list."""
+        prefix = _display_prefix(region_prefix)
+        query = unicodedata.normalize("NFKC", args).strip().lstrip("#＃").strip()
+        if not query:
+            sample = dataset.songs[0].display_id if dataset.songs else 1
+            yield event.plain_result(
+                f"用法：{prefix}查曲绘 歌曲名/ID（例如 {prefix}查曲绘 {sample}）。"
+                "多个结果时返回歌曲列表。"
+            )
+            return
+
+        if query.isdigit():
+            song = next(
+                (
+                    entry
+                    for entry in dataset.songs
+                    if str(entry.id) == query or str(entry.display_id) == query
+                ),
+                None,
+            )
+            if song is None:
+                yield event.plain_result(f"没有找到 ID 为 {query} 的歌曲。")
+                return
+        else:
+            resolved = resolve(
+                dataset.songs, query, page_size=LIST_PAGE_SIZE, kind="song"
+            )
+            if resolved.mode == "detail" and resolved.item is not None:
+                song = resolved.item
+            elif resolved.items:
+                # Several songs share the keyword and the song list already
+                # shows every jacket, so let the user pick from it.
+                path = await self._render_query(
+                    region, script, region_prefix, dataset, "song", args
+                )
+                yield event.image_result(str(path))
+                return
+            else:
+                yield event.plain_result(f"没有找到匹配「{query}」的歌曲。")
+                return
+
+        path = await self._fetch_image(song.jacket_url)
+        if path is None and song.jacket_fallback:
+            path = await self._fetch_image(song.jacket_fallback)
+        if path is not None:
+            yield event.image_result(str(path))
+        elif song.jacket_url or song.jacket_fallback:
+            # Let the adapter fetch the asset itself rather than showing nothing.
+            yield event.image_result(song.jacket_url or song.jacket_fallback)
+        else:
+            yield event.plain_result(
+                f"「{song.title_for_search}」#{song.display_id} 暂无曲绘。"
+            )
 
     # -- raw artwork -----------------------------------------------------------
     async def _handle_art(
@@ -445,8 +774,13 @@ class BdonPlugin(Star):
         self._cleanup_images()
         return await self._prefer_png(cached)
 
-    async def _download_image(self, url: str) -> bytes | None:
-        timeout = _as_int(self.config.get("image_timeout"), 120)
+    async def _download_image(
+        self, url: str, timeout: int | None = None
+    ) -> bytes | None:
+        if not is_public_http_url(url):
+            logger.warning("[bdon] refusing non-public image URL: %s", url)
+            return None
+        timeout = timeout or _as_int(self.config.get("image_timeout"), 120)
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -457,29 +791,17 @@ class BdonPlugin(Star):
             "Referer": "https://bdon.moe/",
         }
         try:
-            if aiohttp is not None:
-                client_timeout = aiohttp.ClientTimeout(total=timeout)
-                async with aiohttp.ClientSession(
-                    timeout=client_timeout, headers=headers
-                ) as session:
-                    async with session.get(url) as response:
-                        if response.status != 200:
-                            return None
-                        return await response.read()
-            return await asyncio.to_thread(
-                self._download_image_sync, url, timeout, headers
-            )
+            client_timeout = aiohttp.ClientTimeout(total=timeout)
+            async with aiohttp.ClientSession(
+                timeout=client_timeout, headers=headers
+            ) as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return None
+                    return await response.read()
         except Exception as exc:  # noqa: BLE001 - fall back to the remote URL
             logger.warning("[bdon] image download failed: %s (%s)", url, exc)
             return None
-
-    @staticmethod
-    def _download_image_sync(url: str, timeout: int, headers: dict[str, str]) -> bytes:
-        import urllib.request
-
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
 
     @staticmethod
     async def _prefer_png(path: Path) -> Path:
@@ -558,6 +880,27 @@ class BdonPlugin(Star):
             "page_width": page_width,
             "page_title": f"{profile.label} · {command_label} · 汐见萤Bot",
         }
+
+    async def _render_help(
+        self, region: str, script: str, region_prefix: str
+    ) -> str | Path:
+        """The command guide. Static content lives in help.html itself."""
+        context = self._base_context(
+            region,
+            script,
+            region_prefix,
+            "帮助",
+            KIND_ACCENTS["help"],
+            page_width=LIST_WIDTH,
+        )
+        return await self.renderer.render(
+            "help.html",
+            context,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            quality=LIST_JPEG_QUALITY,
+            scale=LIST_SCALE,
+        )
 
     async def _render_catalog(
         self, region: str, script: str, region_prefix: str, dataset: Any
@@ -716,6 +1059,8 @@ class BdonPlugin(Star):
             )
             context["item"] = item
             context[kind] = item
+            if kind == "song":
+                context["metrics"] = await self._song_metrics(item, region, script)
             return await self.renderer.render(
                 f"{kind}_detail.html",
                 context,

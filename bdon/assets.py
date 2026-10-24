@@ -9,9 +9,52 @@ segment.
 
 from __future__ import annotations
 
-from urllib.parse import quote
+import ipaddress
+import socket
+from urllib.parse import quote, urlparse
 
 from .constants import RegionProfile
+
+
+def _is_public_address(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    # ::ffff:127.0.0.1 must be judged as the IPv4 loopback it really is.
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+    return address.is_global
+
+
+def is_public_http_url(url: str) -> bool:
+    """Whether a server-side fetch of ``url`` is allowed: public http(s) hosts.
+
+    Blocks non-http schemes, localhost names and loopback / private / reserved
+    addresses so a misconfigured base cannot turn the bot into an SSRF probe.
+    DNS names are resolved here and every answer must be globally routable,
+    which also rejects a name that points at an internal address.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith((".localhost", ".local")):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except OSError:
+            return False
+        resolved = {info[4][0] for info in infos}
+        return bool(resolved) and all(_is_public_address(item) for item in resolved)
+    return _is_public_address(host)
 
 
 class AssetBuilder:
@@ -33,8 +76,7 @@ class AssetBuilder:
         if key.lower().endswith(".png"):
             key = key[:-4]
         # Member-card atlases are published under the original image's key.
-        if key.endswith("_atlas"):
-            key = key[: -len("_atlas")]
+        key = key.removesuffix("_atlas")
         if not key:
             return ""
         if label is None:
@@ -55,8 +97,7 @@ class AssetBuilder:
         key = path.strip().lstrip("/")
         if key.lower().endswith(".png"):
             key = key[:-4]
-        if key.endswith("_atlas"):
-            key = key[: -len("_atlas")]
+        key = key.removesuffix("_atlas")
         if not key:
             return ""
         if label is None:
@@ -103,3 +144,6 @@ class AssetBuilder:
 
     def character_face(self, character_id: int) -> tuple[str, str]:
         return self.pair(f"Character/Image/{character_id}/character_face_icon.png")
+
+    def skill_icon(self, asset_name: str) -> tuple[str, str]:
+        return self.pair(f"Character/Skill/{asset_name}.png") if asset_name else ("", "")

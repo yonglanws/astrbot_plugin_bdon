@@ -9,15 +9,14 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+import aiohttp
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-try:
-    import aiohttp
-except ImportError:  # pragma: no cover
-    aiohttp = None  # type: ignore[assignment]
+from .assets import is_public_http_url
 
 logger = logging.getLogger("astrbot")
 
@@ -130,8 +129,6 @@ class RenderService:
         return await asyncio.to_thread(self._save, data, content_type)
 
     async def _post(self, payload: dict[str, Any]) -> tuple[bytes | None, str]:
-        if aiohttp is None:
-            return await asyncio.to_thread(self._post_urllib, payload)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         headers = {
             "Content-Type": "application/json",
@@ -190,11 +187,13 @@ class RenderService:
         raise RenderError(f"渲染服务返回了未知格式: {str(payload)[:200]}")
 
     async def _download(self, url: str) -> bytes:
-        if aiohttp is None:
-            return await asyncio.to_thread(self._download_urllib, url)
+        if not is_public_http_url(url):
+            raise RenderError("渲染服务返回了非公网图片地址")
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
+            # The render service must point at the image directly; refusing
+            # redirects keeps a public URL from bouncing into a private host.
+            async with session.get(url, allow_redirects=False) as response:
                 if response.status != 200:
                     raise RenderError(f"下载渲染图片失败: HTTP {response.status}")
                 return await response.read()
@@ -206,51 +205,6 @@ class RenderService:
         if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
             return "image/webp"
         return "image/png"
-
-    def _post_urllib(self, payload: dict[str, Any]) -> tuple[bytes | None, str]:
-        import urllib.request
-
-        body = json.dumps(payload).encode("utf-8")
-        urls = [f"{self.endpoint}/text2img/generate", f"{self.endpoint}/html"]
-        if self.endpoint.rstrip("/").endswith("/text2img"):
-            urls.insert(0, f"{self.endpoint}/generate")
-        for url in urls:
-            request = urllib.request.Request(
-                url,
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "image/png,image/jpeg,application/json",
-                },
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    content_type = response.headers.get("Content-Type", "")
-                    raw = response.read()
-                    if content_type.startswith("image/"):
-                        return raw, content_type
-                    parsed = json.loads(raw.decode("utf-8"))
-                    for key in ("data", "image", "base64"):
-                        value = parsed.get(key) if isinstance(parsed, dict) else None
-                        if isinstance(value, str) and value:
-                            if value.startswith("data:image"):
-                                value = value.split(",", 1)[-1]
-                            raw = base64.b64decode(value)
-                            return raw, self._image_type(raw)
-                    raise RenderError("渲染服务返回了未知格式")
-            except RenderError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                if "404" in str(exc):
-                    continue
-                raise RenderError(str(exc)) from exc
-        raise RenderError("无法连接渲染服务")
-
-    def _download_urllib(self, url: str) -> bytes:
-        import urllib.request
-
-        with urllib.request.urlopen(url, timeout=self.timeout) as response:
-            return response.read()
 
     def _save(self, data: bytes, content_type: str) -> Path:
         extension = ".jpg" if "jpeg" in content_type or "jpg" in content_type else ".png"
@@ -290,7 +244,7 @@ class AstrBotRenderService:
     def __init__(
         self,
         render_func: Callable[..., Any] | None,
-        fallback: "RenderService | None" = None,
+        fallback: RenderService | None = None,
         timeout: int = 120,
         scale: str = "high",
     ) -> None:

@@ -21,9 +21,6 @@ ICON_DIR = Path(__file__).resolve().parents[1] / "res" / "icons"
 # out and ships as RarityIcon_BD.
 _BD_LABEL = "BD"
 
-# Support rarity 10 is labelled 特殊 in-game but published as a plain R mark.
-_SUPPORT_R_OVERRIDE = "R"
-
 
 def _rarity_file(kind: str, label: str) -> str:
     if kind == "support":
@@ -54,10 +51,11 @@ def rarity_icon(kind: str, rarity: int) -> str:
     entry = table.get(rarity)
     if not entry:
         return ""
-    label = entry[0]
+    # 特殊 cards have no mark of their own; the published file is a plain R,
+    # which mislabels them, so they get no corner mark at all.
     if kind == "support" and rarity == 10:
-        label = _SUPPORT_R_OVERRIDE
-    return _data_uri(str(ICON_DIR / _rarity_file(kind, label)))
+        return ""
+    return _data_uri(str(ICON_DIR / _rarity_file(kind, entry[0])))
 
 
 def attribute_icon(card_type: int) -> str:

@@ -121,6 +121,28 @@ def test_patterns() -> None:
         "krscard 12": ("kr", "scard", "12"),
         "卡面 64": ("", "卡面", "64"),
         "cn支援卡面 12": ("cn", "支援卡面", "12"),
+        "看卡面 64": ("", "看卡面", "64"),
+        "cn看支援卡 12": ("cn", "看支援卡", "12"),
+        "看歌曲 迷星叫": ("", "看歌曲", "迷星叫"),
+        "歌曲 迷星叫": ("", "歌曲", "迷星叫"),
+        "song 迷星叫": ("", "song", "迷星叫"),
+        "music 迷星叫": ("", "music", "迷星叫"),
+        "查牌 64": ("", "查牌", "64"),
+        "活动": ("", "活动", ""),
+        "event 3": ("", "event", "3"),
+        "查曲绘 迷星叫": ("", "查曲绘", "迷星叫"),
+        "曲绘 迷星叫": ("", "曲绘", "迷星叫"),
+        "谱面 迷星叫 ex": ("", "谱面", "迷星叫 ex"),
+        "谱面预览 迷星叫": ("", "谱面预览", "迷星叫"),
+        "谱面查询 迷星叫": ("", "谱面查询", "迷星叫"),
+        "查铺面 迷星叫": ("", "查铺面", "迷星叫"),
+        "铺面查询 迷星叫": ("", "铺面查询", "迷星叫"),
+        "铺面预览 迷星叫": ("", "铺面预览", "迷星叫"),
+        "帮助": ("", "帮助", ""),
+        "cn帮助": ("cn", "帮助", ""),
+        "jp帮助": ("jp", "帮助", ""),
+        "help": ("", "help", ""),
+        "说明": ("", "说明", ""),
     }
     for text, expected in cases.items():
         match = plugin_main.COMMAND_RE.match(text)
@@ -139,6 +161,9 @@ def test_icons() -> None:
     from astrbot_plugin_bdon.bdon.icons import available_icons
 
     resolved = available_icons()
+    # 特殊 support cards deliberately have no mark: the only published file is
+    # a plain R, which would mislabel them.
+    assert resolved.pop("support/10") is False, resolved
     assert resolved and all(resolved.values()), resolved
     print("icon tests passed")
 
@@ -146,7 +171,10 @@ def test_icons() -> None:
 def test_layout() -> None:
     from astrbot_plugin_bdon.bdon.constants import list_columns
 
-    assert list_columns("card", 70) == 5
+    # Four columns is the cap: it keeps cards near 250px so the enlarged type
+    # stays readable instead of squeezing five small cards into one row.
+    assert list_columns("card", 70) == 4
+    assert list_columns("song", 9) == 4
     assert list_columns("song", 6) == 3
     assert list_columns("card", 3) == 3
     assert list_columns("support", 73) == 4
@@ -224,6 +252,31 @@ def test_plugin() -> None:
             plugin.manager.has_required_data = lambda region: True  # type: ignore[assignment]
             plugin.renderer.render = fake_render  # type: ignore[assignment]
 
+            # Song details ask the (cached) chart for BPM / duration. Keep the
+            # test offline by answering from the bundled fixture.
+            from astrbot_plugin_bdon.bdon.chart import load_score
+
+            chart_fixture = (
+                ROOT / "tests" / ".data" / "charts" / "chart_0001_0001_03.json"
+            )
+            chart_score = (
+                load_score(chart_fixture.read_bytes())
+                if chart_fixture.is_file()
+                else None
+            )
+
+            async def fake_chart_score(
+                region: str,
+                script: str,
+                chart_key: str,
+                timeout: int | None = None,
+            ):
+                if chart_score is None:
+                    raise plugin_main.RenderError("offline")
+                return chart_score
+
+            plugin._load_chart_score = fake_chart_score  # type: ignore[assignment]
+
             cases = [
                 ("查歌 迷星叫", "song_detail.html", "song"),
                 ("cn查歌 迷星叫", "song_detail.html", "song"),
@@ -233,6 +286,15 @@ def test_plugin() -> None:
                 ("cn查卡 ６４", "card_detail.html", "card"),
                 ("hk查卡 64", "card_detail.html", "card"),
                 ("cn查支援卡", "support_list.html", None),
+                ("cn查支援卡 1", "support_detail.html", "support"),
+                ("看卡面 71", "card_detail.html", "card"),
+                ("看支援卡 1", "support_detail.html", "support"),
+                ("看歌曲 迷星叫", "song_detail.html", "song"),
+                ("歌曲 迷星叫", "song_detail.html", "song"),
+                ("music 迷星叫", "song_detail.html", "song"),
+                ("查牌 64", "card_detail.html", "card"),
+                ("活动", "event_detail.html", "event"),
+                ("event 3", "event_detail.html", "event"),
                 ("cn查活动", "event_detail.html", "event"),
                 ("cn查活动 3", "event_detail.html", "event"),
                 ("cn活动一览", "event_list.html", None),
@@ -242,6 +304,9 @@ def test_plugin() -> None:
                 ("cn查图鉴", "catalog.html", None),
                 ("cn查图鉴 歌曲", "song_list.html", None),
                 ("cn查图鉴 活动", "event_list.html", None),
+                ("cn查曲绘 MyGO", "song_list.html", None),
+                ("cn帮助", "help.html", None),
+                ("help", "help.html", None),
             ]
             for text, template, key in cases:
                 event = FakeEvent(text)
@@ -266,12 +331,69 @@ def test_plugin() -> None:
             assert captured[0][1]["script"] == "simplified"
             assert captured[0][1]["region_prefix"] == ""
 
+            # The song page fills BPM / duration from the chart; card and
+            # support pages show all five skill levels plus max-build growth.
+            song_metrics = captured[0][1]["metrics"]
+            assert song_metrics is not None
+            assert song_metrics["bpm_label"] and song_metrics["duration_label"]
+            card_context = next(
+                context
+                for template, context in captured
+                if template == "card_detail.html"
+            )
+            assert card_context["card"].growth is not None
+            assert card_context["card"].growth.total_power > card_context["card"].total_power
+            assert len(card_context["card"].skills) == 3
+            assert all(
+                len(skill.levels) == 5 for skill in card_context["card"].skills
+            )
+            support_context = next(
+                context
+                for template, context in captured
+                if template == "support_detail.html"
+            )
+            assert support_context["support"].growth is not None
+            assert support_context["support"].skills
+            assert all(
+                len(skill.levels) == 5
+                for skill in support_context["support"].skills
+            )
+            # Every skill in the downloaded tables has five levels, and each
+            # level has its real numbers rather than a placeholder.
+            for item in (*dataset.cards, *dataset.supports):
+                for skill in item.skills:
+                    assert len(skill.levels) == 5, (item.id, skill.label)
+                    assert all(level.description for level in skill.levels), (
+                        item.id,
+                        skill.label,
+                    )
+
+            # 查谱面: argument parsing and offline-safe routes (the score
+            # download itself is covered by tests/test_chart.py fixtures).
+            parse = plugin_main.BdonPlugin._parse_chart_args
+            assert parse("1 ex") == ("1", "expert")
+            assert parse("ex 1") == ("1", "expert")
+            assert parse("迷星叫 ez") == ("迷星叫", "easy")
+            assert parse("#12") == ("12", None)
+            assert parse("3") == ("3", None)  # a lone number is a song ID
+            assert parse("1 4") == ("1", "expert")  # second digit = difficulty
+            assert parse("") == ("", None)
+
+            event = FakeEvent("查谱面")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert event.stopped and results[0][0] == "plain"
+            assert "用法" in results[0][1]
+
+            event = FakeEvent("查谱面 不存在的歌zzz")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results[0][0] == "plain" and "没有找到" in results[0][1]
+
             # Lists still fit in one image. Cards and songs only browse the
             # newest 20 without a keyword; every other table stays complete.
             for text, shown, total in (
-                ("cn查歌", 20, 90),
-                ("cn查卡", 20, 70),
-                ("cn查支援卡", 73, 73),
+                ("cn查歌", 20, 91),
+                ("cn查卡", 20, 71),
+                ("cn查支援卡", 74, 74),
                 ("cn查贴纸", 84, 84),
                 ("cn查漫画", 25, 25),
             ):
@@ -323,6 +445,32 @@ def test_plugin() -> None:
             assert current_event.song is not None
             assert current_event.member_bonuses and current_event.support_bonuses
             assert current_event.point_rewards and current_event.live_rewards
+
+            # Song live rules: per-song score thresholds (C–SS, the zero-score
+            # D row is dropped) and the shared combo ladder of the hardest
+            # chart, whose combo counts are ceil of the note share.
+            import math
+
+            song_100015 = next(song for song in dataset.songs if song.id == 100015)
+            assert [rank.label for rank in song_100015.score_ranks] == [
+                "C", "B", "A", "S", "SS",
+            ]
+            assert all(rank.required > 0 for rank in song_100015.score_ranks)
+            assert song_100015.score_ranks[-1].reward == "星钻 ×30"
+            assert song_100015.score_ranks[-1].battle > song_100015.score_ranks[-1].required
+            hardest = song_100015.difficulties[-1]
+            assert [tier.label for tier in song_100015.combo_tiers] == [
+                "25%", "50%", "75%", "全连",
+            ]
+            assert song_100015.combo_tiers[0].combo == math.ceil(hardest.notes * 25 / 100)
+            assert song_100015.combo_tiers[-1].combo == hardest.notes == 1777
+            assert song_100015.combo_tiers[-1].reward == "星钻 ×25"
+
+            # Card and support lists follow release order, newest first — not
+            # rarity, so 特殊 cards no longer jump to the top of the list.
+            for entries in (dataset.cards, dataset.supports):
+                dates = [entry.start_dt for entry in entries if entry.start_dt]
+                assert dates == sorted(dates, reverse=True)
 
             # The tw prefix must reach the traditional dataset and keep the
             # prefix in its command hints.
@@ -379,6 +527,47 @@ def test_plugin() -> None:
             results = [result async for result in plugin.on_bdon_message(event)]
             assert results == [("image", named_stamp.image_url)], results
             assert event.stopped
+
+            # 查曲绘: an ID or a single hit sends the jacket image; the usage
+            # hint and a miss are plain text, several hits render the list.
+            jacket_song = dataset.songs[0]
+            event = FakeEvent(f"查曲绘 {jacket_song.display_id}")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results == [
+                ("image", jacket_song.jacket_url or jacket_song.jacket_fallback)
+            ], results
+            assert event.stopped
+
+            event = FakeEvent(f"cn查曲绘 {jacket_song.id}")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results == [
+                ("image", jacket_song.jacket_url or jacket_song.jacket_fallback)
+            ], results
+            assert event.stopped
+
+            named_song = next(
+                song
+                for song in dataset.songs
+                if song.title_for_search == "迷星叫"
+            )
+            event = FakeEvent(f"查曲绘 {named_song.title_for_search}")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results == [
+                ("image", named_song.jacket_url or named_song.jacket_fallback)
+            ], results
+            assert event.stopped
+
+            event = FakeEvent("查曲绘")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results[0][0] == "plain" and "用法" in results[0][1]
+
+            event = FakeEvent("查曲绘 不存在的歌zzz")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results[0][0] == "plain" and "没有找到" in results[0][1]
+
+            event = FakeEvent("查曲绘 999999")
+            results = [result async for result in plugin.on_bdon_message(event)]
+            assert results[0][0] == "plain" and "没有找到" in results[0][1]
 
             # The short in-game number shown in the UI also resolves.
             first_song = dataset.songs[0]

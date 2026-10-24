@@ -9,9 +9,9 @@ from __future__ import annotations
 import difflib
 import re
 import unicodedata
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
-
+from typing import Any
 
 PAGE_RE = re.compile(
     r"(?:^|\s)(?:-p\s*(\d+)|第\s*(\d+)\s*页|页\s*(\d+)|#p(\d+))\s*$",
