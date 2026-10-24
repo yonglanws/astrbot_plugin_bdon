@@ -95,6 +95,25 @@ class FakeEvent:
         return ("image", path)
 
 
+def test_public_url_filter() -> None:
+    from bdon.assets import is_public_http_url
+
+    # Public hostnames must stay usable without a separate DNS lookup: a
+    # Clash/sing-box TUN answers with fake IPs (198.18/15) that the HTTP
+    # client can still reach through the proxy.
+    assert is_public_http_url("https://assets.bdon.moe/zh-Hans/Live/MusicScore/1.json")
+    assert is_public_http_url("http://example.com/image.png")
+    for blocked in (
+        "http://127.0.0.1:8999/x",
+        "http://localhost/x",
+        "http://10.0.0.1/x",
+        "http://[::1]/x",
+        "https://198.18.0.2/x",
+        "ftp://example.com/x",
+    ):
+        assert not is_public_http_url(blocked), blocked
+
+
 def test_patterns() -> None:
     cases = {
         "查歌": ("", "查歌", ""),
