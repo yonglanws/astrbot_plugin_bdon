@@ -10,7 +10,6 @@ segment.
 from __future__ import annotations
 
 import ipaddress
-import socket
 from urllib.parse import quote, urlparse
 
 from .constants import RegionProfile
@@ -32,9 +31,10 @@ def is_public_http_url(url: str) -> bool:
     """Whether a server-side fetch of ``url`` is allowed: public http(s) hosts.
 
     Blocks non-http schemes, localhost names and loopback / private / reserved
-    addresses so a misconfigured base cannot turn the bot into an SSRF probe.
-    DNS names are resolved here and every answer must be globally routable,
-    which also rejects a name that points at an internal address.
+    address literals so a misconfigured base cannot turn the bot into an SSRF
+    probe. DNS names are allowed on purpose: deployments behind Clash/sing-box
+    TUN get synthetic fake-IP answers (198.18/15), and a separate lookup here
+    would reject a host the HTTP client can still reach through the proxy.
     """
     try:
         parsed = urlparse(url)
@@ -48,12 +48,7 @@ def is_public_http_url(url: str) -> bool:
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        try:
-            infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-        except OSError:
-            return False
-        resolved = {info[4][0] for info in infos}
-        return bool(resolved) and all(_is_public_address(item) for item in resolved)
+        return True
     return _is_public_address(host)
 
 
