@@ -1,7 +1,7 @@
 name: astrbot_plugin_bdon
 display_name: 邦多利 Our Notes 查询插件
-desc: 邦多利 Our Notes 查歌 / 查卡 / 查支援卡 / 查贴纸 / 查漫画 / 查活动 / 查图鉴，支持 card / scard 原图直发，港台、日、韩、国际服，图片由 AstrBot t2i 渲染。
-short_desc: 邦多利 Our Notes 资料查询
-version: v1.6.12
+desc: 邦多利 Our Notes 查歌 / 查卡 / 查支援卡 / 查贴纸 / 查漫画 / 查活动 / 查卡池 / 查图鉴 / 模拟抽卡，支持 card / scard 原图直发，港台、日、韩、国际服，图片由 AstrBot t2i 渲染。
+short_desc: 邦多利 Our Notes 资料查询与模拟抽卡
+version: v1.7.0
 author: 慵懒午睡
 astrbot_version: ">=4.5.0"

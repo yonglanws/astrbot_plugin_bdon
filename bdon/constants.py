@@ -28,6 +28,9 @@ LIST_JPEG_QUALITY = 90
 # the whole table.
 BROWSE_LIMIT = 20
 BROWSE_KINDS = {"song", "card"}
+# A gacha search draws only the matches, but a generic keyword ("招募") can hit
+# every pool; cap the grid so the image stays bounded as the pool table grows.
+GACHA_SEARCH_LIMIT = 12
 
 
 def list_columns(kind: str, count: int) -> int:
@@ -270,6 +273,14 @@ OPTIONAL_TABLES: tuple[str, ...] = (
     "MasterLiveScoreRank",
     "MasterLiveMusicScoreReward",
     "MasterLiveMusicComboReward",
+    # 卡池: the pool row, its prize pool, the weighted rarity buckets, the
+    # purchase options and the per-draw bonus items.
+    "MasterGacha",
+    "MasterGachaPrize",
+    "MasterGachaLot",
+    "MasterGachaProduct",
+    "MasterGachaBonus",
+    "MasterGachaBonusLot",
 )
 
 ALL_TABLES: tuple[str, ...] = REQUIRED_TABLES + OPTIONAL_TABLES
@@ -338,6 +349,40 @@ COMMAND_ALIASES: dict[str, str] = {
     "查圖鑑": "catalog",
     "图鉴": "catalog",
     "圖鑑": "catalog",
+    # 卡池 lookups. 招募 is the Simplified term the CN masterdata uses, so it
+    # reads as the pool name rather than as the simulation command.
+    "查卡池": "gacha",
+    "查轉蛋": "gacha",
+    "查转蛋": "gacha",
+    "查扭蛋": "gacha",
+    "卡池": "gacha",
+    "招募": "gacha",
+    "转蛋": "gacha",
+    "轉蛋": "gacha",
+    "gacha": "gacha",
+    # Simulation commands. They are routed separately from the lookups because
+    # each call also mutates the caller's pull counter.
+    "模拟抽卡": "gacha_sim",
+    "模擬抽卡": "gacha_sim",
+    "模拟招募": "gacha_sim",
+    "模擬招募": "gacha_sim",
+    "模拟十连": "gacha_sim",
+    "模擬十連": "gacha_sim",
+    "模拟单抽": "gacha_sim",
+    "模擬單抽": "gacha_sim",
+    "单抽": "gacha_sim",
+    "單抽": "gacha_sim",
+    "十连": "gacha_sim",
+    "十連": "gacha_sim",
+    "抽卡": "gacha_sim",
+    "抽一次": "gacha_sim",
+    "重置抽卡": "gacha_reset",
+    "重置抽数": "gacha_reset",
+    "重置抽數": "gacha_reset",
+    "重置招募": "gacha_reset",
+    "清空抽卡": "gacha_reset",
+    "清空抽数": "gacha_reset",
+    "清空抽數": "gacha_reset",
     "帮助": "help",
     "說明": "help",
     "说明": "help",
@@ -363,6 +408,7 @@ KIND_LABELS: dict[str, str] = {
     "event": "活动",
     "event_list": "活动一览",
     "catalog": "图鉴",
+    "gacha": "卡池",
     "help": "帮助",
 }
 
@@ -376,6 +422,7 @@ KIND_COMMANDS: dict[str, str] = {
     "event": "查活动",
     "event_list": "活动一览",
     "catalog": "查图鉴",
+    "gacha": "查卡池",
     "help": "帮助",
 }
 

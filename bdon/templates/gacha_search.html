@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import img, char_face, empty_state %}
+{% block styles %}{% include "_gacha_styles.html" %}{% endblock %}
+{% block content %}
+<div class="gacha-page">
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">招募搜索</div>
+    <h1 class="page-title">搜索「{{ resolved.query }}」</h1>
+    <div class="page-sub">按匹配度排序 · 支持卡池名 / 角色名 / 乐队名 / ID</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ resolved.total }}</b><span>个卡池</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}查卡池 卡池名/角色/ID</b> 搜索 · <b>{{ region_prefix }}查卡池 15</b> 详情</div>
+  </div>
+</header>
+
+{% if resolved.items %}
+<div class="gacha-grid">
+  {% for gacha in resolved.items %}
+  <article class="gacha-card {{ gacha.status_class }}">
+    <div class="gacha-cover">
+      {{ img(gacha.banner_url, gacha.banner_fallback, gacha.name, 'gacha-cover-img') }}
+      <div class="gacha-cover-shade"></div>
+      <span class="state-pill status-pill">{{ gacha.status_label }}</span>
+      {% if gacha.is_limited %}<span class="gacha-limited">限定</span>{% endif %}
+      <span class="gacha-id">#{{ gacha.id }}</span>
+    </div>
+    <div class="gacha-body">
+      <div class="gacha-name">{{ gacha.name }}</div>
+      <div class="gacha-period">{{ gacha.period_label }}</div>
+      <div class="gacha-chips">
+        <span class="chip">{{ gacha.currency_label }}</span>
+        <span class="chip">成员卡 {{ gacha.member_count }}</span>
+        <span class="chip">支援卡 {{ gacha.support_count }}</span>
+      </div>
+      {% if gacha.pickup_characters %}
+      <div class="gacha-pickups">
+        {% for character in gacha.pickup_characters[:6] %}{{ char_face(character) }}{% endfor %}
+        {% if gacha.pickup_characters | length > 6 %}<span class="chip">+{{ (gacha.pickup_characters | length) - 6 }}</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% if search_capped %}
+<div class="search-note">共 {{ resolved.total }} 个匹配，仅展示匹配度最高的 {{ resolved.items | length }} 个；请用更准确的名字或 ID。</div>
+{% endif %}
+{% else %}
+{{ empty_state('没有找到这个卡池', '试试卡池名、Pick Up 角色名、乐队名或卡池 ID。', resolved.suggestions) }}
+{% endif %}
+</div>
+{% endblock %}

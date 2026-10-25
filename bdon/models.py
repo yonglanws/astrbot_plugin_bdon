@@ -512,6 +512,322 @@ class Event:
         return "活动已结束"
 
 
+# -- 卡池 ---------------------------------------------------------------------
+# MasterGachaLot._resourceTypeConstraint -> the kind of prize the bucket pays.
+GACHA_RESOURCE_KINDS: dict[int, str] = {1: "item", 2: "member", 3: "support"}
+GACHA_KIND_LABELS: dict[str, str] = {
+    "member": "成员卡",
+    "support": "支援卡",
+    "item": "道具",
+}
+# MasterGachaProduct._itemType -> what the price is paid in.
+GACHA_CURRENCY_LABELS: dict[int, str] = {
+    2: "招募券",
+    12: "星钻",
+    13: "星钻（付费）",
+    15: "每日免费",
+    23: "免费招募券",
+    24: "T.G.W",
+}
+
+
+def gacha_rarity_info(kind: str, rarity: int) -> tuple[str, str, str]:
+    """``(label, colour, icon)`` for a pool's rarity bucket."""
+    if kind == "member":
+        label, color = MEMBER_RARITIES.get(rarity, (f"R{rarity}", "#7FA8C9"))
+        return label, color, rarity_icon("card", rarity)
+    if kind == "support":
+        label, color = SUPPORT_RARITIES.get(rarity, (f"R{rarity}", "#7FA8C9"))
+        return label, color, rarity_icon("support", rarity)
+    # Items have no rarity tier; the kind label already says 道具.
+    return "", "#7A8797", ""
+
+
+@dataclass
+class GachaPool:
+    """One rarity bucket: ``rate`` is its share of a single pull, in percent."""
+
+    kind: str
+    rarity: int
+    rate: float
+    count: int
+    pickup_count: int = 0
+
+    @property
+    def kind_label(self) -> str:
+        return GACHA_KIND_LABELS.get(self.kind, "道具")
+
+    @property
+    def rarity_label(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[0]
+
+    @property
+    def rarity_color(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[1]
+
+    @property
+    def rarity_icon(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[2]
+
+    @property
+    def rate_label(self) -> str:
+        return f"{self.rate:.1f}%"
+
+    @property
+    def pickup_label(self) -> str:
+        return f"含 Pick Up {self.pickup_count}" if self.pickup_count else ""
+
+
+@dataclass
+class GachaDraw:
+    """One individual prize, with the weight the game's lot table gives it.
+
+    Weights are in 1/10000 of a pull, so ``weight / 100`` is the percentage.
+    """
+
+    kind: str
+    resource_id: int
+    amount: int
+    rarity: int
+    weight: float
+    pickup: bool
+    card: Any | None = None
+    item_name: str = ""
+    item_icon: str = ""
+    item_icon_fallback: str = ""
+
+    @property
+    def rate(self) -> float:
+        return self.weight / 100.0
+
+    @property
+    def rate_label(self) -> str:
+        return f"{self.rate:.2f}%"
+
+    @property
+    def kind_label(self) -> str:
+        return GACHA_KIND_LABELS.get(self.kind, "道具")
+
+    @property
+    def rarity_label(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[0]
+
+    @property
+    def rarity_color(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[1]
+
+    @property
+    def rarity_icon(self) -> str:
+        return gacha_rarity_info(self.kind, self.rarity)[2]
+
+    @property
+    def name(self) -> str:
+        if self.card is not None:
+            return getattr(self.card, "title", "") or getattr(
+                self.card, "name", ""
+            ) or f"卡牌 #{self.resource_id}"
+        return self.item_name or f"道具 #{self.resource_id}"
+
+    @property
+    def subtitle(self) -> str:
+        if self.card is not None:
+            character = getattr(self.card, "character_name", "")
+            if character:
+                return character
+            characters = getattr(self.card, "characters", None) or []
+            return " / ".join(item.name for item in characters)
+        return f"×{self.amount:,}" if self.amount > 1 else "道具"
+
+    @property
+    def image_url(self) -> str:
+        if self.card is not None:
+            return getattr(self.card, "thumb_url", "") or getattr(
+                self.card, "art_url", ""
+            )
+        return self.item_icon
+
+    @property
+    def image_fallback(self) -> str:
+        if self.card is not None:
+            return getattr(self.card, "thumb_fallback", "") or getattr(
+                self.card, "art_fallback", ""
+            )
+        return self.item_icon_fallback
+
+    @property
+    def art_url(self) -> str:
+        return getattr(self.card, "art_url", "") or self.image_url
+
+    @property
+    def art_fallback(self) -> str:
+        return getattr(self.card, "art_fallback", "") or self.image_fallback
+
+
+@dataclass
+class GachaOption:
+    """One purchase option (paid/free single and ten-pull)."""
+
+    slot: int
+    label: str
+    draw_count: int
+    currency: str
+    price: int
+    first_time_price: int | None
+    guarantee: str
+    limit_label: str
+    point: int
+    guarantee_rarity: int = 0
+
+    @property
+    def price_label(self) -> str:
+        return f"{self.price:,}" if self.price > 0 else "免费"
+
+    @property
+    def first_time_label(self) -> str:
+        return "首次免费" if self.first_time_price == 0 else ""
+
+
+@dataclass
+class GachaBonus:
+    """A bonus item granted alongside a purchase."""
+
+    label: str
+    item_name: str
+    item_icon: str
+    count: int
+
+    @property
+    def count_label(self) -> str:
+        return f"×{self.count:,}"
+
+
+@dataclass
+class Gacha:
+    id: int
+    name: str
+    description: str
+    banner_url: str
+    banner_fallback: str
+    logo_url: str
+    logo_fallback: str
+    start_at: str
+    end_at: str
+    start_dt: datetime | None
+    end_dt: datetime | None
+    is_limited: bool
+    priority: int
+    member_count: int
+    support_count: int
+    item_count: int
+    pools: list[GachaPool]
+    draws: list[GachaDraw]
+    pickup_characters: list[Character]
+    pickup_cards: list[Any]
+    options: list[GachaOption]
+    bonuses: list[GachaBonus]
+    currency_label: str = ""
+    search_text: str = ""
+
+    @property
+    def title_for_search(self) -> str:
+        return self.name
+
+    @property
+    def display_id(self) -> int:
+        return self.id
+
+    @property
+    def period_label(self) -> str:
+        if self.start_at and self.end_at:
+            return f"{self.start_at} – {self.end_at}"
+        if self.end_at:
+            return f"至 {self.end_at}"
+        if self.start_at:
+            return f"{self.start_at} 起"
+        return "常驻开放"
+
+    @property
+    def status(self) -> str:
+        now = datetime.now()
+        if self.start_dt and now < self.start_dt:
+            return "upcoming"
+        if self.end_dt and now > self.end_dt:
+            return "ended"
+        if not self.start_dt and not self.end_dt:
+            return "permanent"
+        return "ongoing"
+
+    @property
+    def status_label(self) -> str:
+        return {
+            "ongoing": "进行中",
+            "upcoming": "即将开始",
+            "ended": "已结束",
+            "permanent": "常驻开放",
+        }.get(self.status, "卡池")
+
+    @property
+    def status_class(self) -> str:
+        return {
+            "ongoing": "event-live",
+            "permanent": "event-live",
+            "upcoming": "event-soon",
+            "ended": "event-over",
+        }.get(self.status, "event-over")
+
+    @property
+    def max_pool_rate(self) -> float:
+        return max((pool.rate for pool in self.pools), default=1.0) or 1.0
+
+    @property
+    def guarantee_label(self) -> str:
+        return next(
+            (
+                option.guarantee
+                for option in self.options
+                if option.draw_count >= 10 and option.guarantee
+            ),
+            "",
+        )
+
+    @property
+    def has_ten_guarantee(self) -> bool:
+        """Whether this pool's ten-pull product guarantees a rarity."""
+        return any(
+            option.draw_count >= 10 and option.guarantee
+            for option in self.options
+        )
+
+    @property
+    def ten_guarantee_rarity(self) -> int:
+        """The rarity a ten-pull guarantees, or 0 when there is no guarantee."""
+        return next(
+            (
+                option.guarantee_rarity
+                for option in self.options
+                if option.draw_count >= 10 and option.guarantee
+            ),
+            0,
+        )
+
+    @property
+    def has_ten_option(self) -> bool:
+        """Whether the pool actually sells a ten-pull."""
+        return any(option.draw_count >= 10 for option in self.options)
+
+    @property
+    def member_pools(self) -> list[GachaPool]:
+        return [pool for pool in self.pools if pool.kind == "member"]
+
+    @property
+    def support_pools(self) -> list[GachaPool]:
+        return [pool for pool in self.pools if pool.kind == "support"]
+
+    @property
+    def item_pools(self) -> list[GachaPool]:
+        return [pool for pool in self.pools if pool.kind == "item"]
+
+
 @dataclass
 class Dataset:
     region: RegionProfile
@@ -524,6 +840,7 @@ class Dataset:
     bands: dict[int, Band]
     characters: dict[int, Character]
     script: str = "simplified"
+    gachas: list[Gacha] = field(default_factory=list)
 
     def items_for(self, kind: str) -> list[Any]:
         return {
@@ -533,6 +850,7 @@ class Dataset:
             "stamp": self.stamps,
             "comic": self.comics,
             "event": self.events,
+            "gacha": self.gachas,
         }[kind]
 
 
@@ -745,6 +1063,17 @@ class DatasetBuilder:
             cards,
             supports,
         )
+        gachas = self._build_gachas(
+            rows(tables.get("MasterGacha")),
+            rows(tables.get("MasterGachaPrize")),
+            rows(tables.get("MasterGachaLot")),
+            rows(tables.get("MasterGachaProduct")),
+            rows(tables.get("MasterGachaBonus")),
+            rows(tables.get("MasterGachaBonusLot")),
+            rows(tables.get("MasterItem")),
+            cards,
+            supports,
+        )
 
         return Dataset(
             region=self.region,
@@ -757,6 +1086,7 @@ class DatasetBuilder:
             bands=self.bands,
             characters=self.characters,
             script=self.script,
+            gachas=gachas,
         )
 
     # -- text ------------------------------------------------------------------
@@ -1985,6 +2315,355 @@ class DatasetBuilder:
             support_skill_level=int(last_rank.get("_supportSkill01Level") or 1),
             gekisou_skill_level=int(last_rank.get("_gekisouSupportSkill01Level") or 1),
         )
+
+    # -- 卡池 ------------------------------------------------------------------
+    @staticmethod
+    def _gacha_is_pickup(prize: Mapping[str, Any]) -> bool:
+        return int(prize.get("_pickUpType") or 0) == 2
+
+    @staticmethod
+    def _gacha_prize_weights(
+        group: list[dict[str, Any]], lot_weight: float
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Splits one rarity bucket's weight across its prizes.
+
+        A pickup row's ``_pickUpFixedRate`` is the whole bucket share reserved
+        for the pickup cards (50 = half the bucket, 100 = all of it), not a
+        per-card percentage: two 50-rate pickups take 25% each. The rest of the
+        bucket is split evenly between the non-pickup prizes.
+        """
+        pickups = [prize for prize in group if DatasetBuilder._gacha_is_pickup(prize)]
+        others = [prize for prize in group if not DatasetBuilder._gacha_is_pickup(prize)]
+        fixed = max(
+            (int(prize.get("_pickUpFixedRate") or 0) for prize in pickups), default=0
+        )
+        weights: list[tuple[dict[str, Any], float]] = []
+        if pickups and fixed > 0:
+            share = lot_weight * min(100, fixed) / 100.0
+            each = share / len(pickups)
+            weights.extend((prize, each) for prize in pickups)
+            remaining = max(0.0, lot_weight - share)
+            if others and remaining > 0:
+                each_other = remaining / len(others)
+                weights.extend((prize, each_other) for prize in others)
+        else:
+            each = lot_weight / len(group)
+            weights.extend((prize, each) for prize in group)
+        return weights
+
+    def _gacha_lots(
+        self,
+        lots: list[dict[str, Any]],
+        prizes_by_group: Mapping[int, list[dict[str, Any]]],
+        cards_by_id: Mapping[int, Card],
+        supports_by_id: Mapping[int, SupportCard],
+        items: Mapping[int, dict[str, Any]],
+    ) -> tuple[list[GachaPool], list[GachaDraw]]:
+        total_weight = sum(max(0, int(lot.get("_weight") or 0)) for lot in lots)
+        if total_weight <= 0:
+            return [], []
+        pools: list[GachaPool] = []
+        draws: list[GachaDraw] = []
+        for lot in lots:
+            weight = max(0, int(lot.get("_weight") or 0))
+            group = prizes_by_group.get(int(lot.get("_prizeGroupId") or 0), [])
+            if weight <= 0 or not group:
+                continue
+            lot_kind = GACHA_RESOURCE_KINDS.get(
+                int(lot.get("_resourceTypeConstraint") or 0), "item"
+            )
+            rarity = int(lot.get("_rarityConstraint") or 0)
+            pools.append(
+                GachaPool(
+                    kind=lot_kind,
+                    rarity=rarity,
+                    rate=weight / total_weight * 100,
+                    count=len(group),
+                    pickup_count=sum(
+                        1 for prize in group if self._gacha_is_pickup(prize)
+                    ),
+                )
+            )
+            for prize, prize_weight in self._gacha_prize_weights(group, weight):
+                if prize_weight <= 0:
+                    continue
+                resource_id = int(prize.get("_resourceId") or 0)
+                prize_kind = GACHA_RESOURCE_KINDS.get(
+                    int(prize.get("_resourceType") or 0), lot_kind
+                )
+                card = None
+                item_name = ""
+                item_icon = ""
+                item_icon_fallback = ""
+                if prize_kind == "member":
+                    card = cards_by_id.get(resource_id)
+                elif prize_kind == "support":
+                    card = supports_by_id.get(resource_id)
+                else:
+                    item = items.get(resource_id) or {}
+                    item_name = self.text(
+                        str(item.get("_nameTextId") or "")
+                    ) or f"道具 #{resource_id}"
+                    item_icon, item_icon_fallback = self.assets.item(
+                        str(item.get("_imagePath") or "")
+                    )
+                draws.append(
+                    GachaDraw(
+                        kind=prize_kind,
+                        resource_id=resource_id,
+                        amount=int(prize.get("_amount") or 1),
+                        rarity=rarity,
+                        weight=prize_weight,
+                        pickup=self._gacha_is_pickup(prize),
+                        card=card,
+                        item_name=item_name,
+                        item_icon=item_icon,
+                        item_icon_fallback=item_icon_fallback,
+                    )
+                )
+        return pools, draws
+
+    @staticmethod
+    def _gacha_option(
+        slot: int, product: dict[str, Any] | None
+    ) -> GachaOption | None:
+        if not product:
+            return None
+        draw_count = int(product.get("_drawCount") or 1)
+        item_type = int(product.get("_itemType") or 0)
+        label = f"招募{draw_count}次" + ("（付费）" if item_type == 13 else "")
+        first_raw = int(product.get("_firstTimePrice") or 0)
+        first_time = 0 if first_raw < 0 else (first_raw or None)
+        ensured_count = int(product.get("_ensuredCount") or 0)
+        ensured_rarity = int(product.get("_ensuredRarity") or 0)
+        guarantee = ""
+        if ensured_count > 0 and ensured_rarity > 0:
+            rarity = MEMBER_RARITIES.get(ensured_rarity) or SUPPORT_RARITIES.get(
+                ensured_rarity
+            )
+            if rarity:
+                guarantee = f"保底 {ensured_count} 张 {rarity[0]} 以上"
+        limit = int(product.get("_limitConsumeCount") or 0)
+        limit_label = ""
+        if limit > 0:
+            daily = int(product.get("_resetType") or 0) == 2
+            limit_label = f"限 {limit} 次" + ("/天" if daily else "")
+        return GachaOption(
+            slot=slot,
+            label=label,
+            draw_count=draw_count,
+            currency=GACHA_CURRENCY_LABELS.get(item_type, "招募券"),
+            price=int(product.get("_price") or 0),
+            first_time_price=first_time,
+            guarantee=guarantee,
+            limit_label=limit_label,
+            point=int(product.get("_gachaPoint") or 0),
+            guarantee_rarity=ensured_rarity if guarantee else 0,
+        )
+
+    @staticmethod
+    def _gacha_currency(options: list[GachaOption]) -> str:
+        currencies = {option.currency for option in options}
+        if "星钻" in currencies:
+            return "星钻"
+        if "星钻（付费）" in currencies:
+            return "付费星钻"
+        return " / ".join(sorted(currencies)) or "—"
+
+    def _gacha_bonuses(
+        self,
+        row: Mapping[str, Any],
+        bonuses: Mapping[int, dict[str, Any]],
+        bonus_lots: Mapping[int, list[dict[str, Any]]],
+        items: Mapping[int, dict[str, Any]],
+        slot_draws: Mapping[int, int],
+    ) -> list[GachaBonus]:
+        result: list[GachaBonus] = []
+        seen: set[tuple[str, int]] = set()
+        for slot in range(1, 5):
+            draw_count = int(slot_draws.get(slot) or 0)
+            for bonus_id in row.get(f"_gachaBonusIds{slot}") or []:
+                bonus = bonuses.get(int(bonus_id))
+                if not bonus:
+                    continue
+                required = int(bonus.get("_requiredGachaDrawCount") or 1)
+                if draw_count:
+                    label = f"招募{draw_count}次附赠"
+                elif required <= 1:
+                    label = "每次招募附赠"
+                else:
+                    label = f"每 {required} 次招募附赠"
+                for lot in bonus_lots.get(int(bonus_id), []):
+                    if int(lot.get("_bonusPrizeType") or 0) != 1:
+                        continue
+                    item = items.get(int(lot.get("_bonusPrizeId") or 0)) or {}
+                    name = self.text(str(item.get("_nameTextId") or "")) or "道具"
+                    icon, _ = self.assets.item(str(item.get("_imagePath") or ""))
+                    count = int(lot.get("_bonusPrizeCount") or 0)
+                    key = (name, count)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    result.append(GachaBonus(label, name, icon, count))
+        return result
+
+    def _build_gachas(
+        self,
+        data: Iterable[dict[str, Any]],
+        prize_rows: Iterable[dict[str, Any]],
+        lot_rows: Iterable[dict[str, Any]],
+        product_rows: Iterable[dict[str, Any]],
+        bonus_rows: Iterable[dict[str, Any]],
+        bonus_lot_rows: Iterable[dict[str, Any]],
+        item_rows: Iterable[dict[str, Any]],
+        cards: list[Card],
+        supports: list[SupportCard],
+    ) -> list[Gacha]:
+        prizes_by_group: dict[int, list[dict[str, Any]]] = {}
+        for prize in prize_rows:
+            prizes_by_group.setdefault(
+                int(prize.get("_groupId") or 0), []
+            ).append(prize)
+        lots_by_group: dict[int, list[dict[str, Any]]] = {}
+        for lot in lot_rows:
+            lots_by_group.setdefault(
+                int(lot.get("_lotGroupId") or 0), []
+            ).append(lot)
+        products = {int(row.get("_id") or 0): row for row in product_rows}
+        bonuses = {int(row.get("_id") or 0): row for row in bonus_rows}
+        bonus_lots: dict[int, list[dict[str, Any]]] = {}
+        for lot in bonus_lot_rows:
+            bonus_lots.setdefault(
+                int(lot.get("_gachaBonusId") or 0), []
+            ).append(lot)
+        items = {int(row.get("_id") or 0): row for row in item_rows}
+        cards_by_id = {card.id: card for card in cards}
+        supports_by_id = {support.id: support for support in supports}
+
+        result: list[Gacha] = []
+        for row in data:
+            gacha_id = int(row.get("_id") or 0)
+            if not gacha_id:
+                continue
+            pools, draws = self._gacha_lots(
+                lots_by_group.get(int(row.get("_lotGroupId") or 0), []),
+                prizes_by_group,
+                cards_by_id,
+                supports_by_id,
+                items,
+            )
+            if not draws:
+                continue
+            banner, banner_fallback = self.assets.gacha_banner(
+                str(row.get("_bannerAssetName") or "")
+            )
+            logo, logo_fallback = self.assets.gacha_logo(
+                str(row.get("_logoAssetName") or "")
+            )
+            name_text_id = str(row.get("_nameTextId") or "")
+            description_text_id = str(row.get("_descriptionTextId") or "")
+            name = self.text(name_text_id) or f"卡池 #{gacha_id}"
+            description = self.text(description_text_id)
+            products_by_slot: dict[int, dict[str, Any] | None] = {
+                slot: products.get(int(row.get(f"_productId{slot}") or 0))
+                for slot in range(1, 5)
+            }
+            slot_draws = {
+                slot: int((product or {}).get("_drawCount") or 0)
+                for slot, product in products_by_slot.items()
+            }
+            options = [
+                self._gacha_option(slot, product)
+                for slot, product in products_by_slot.items()
+            ]
+            valid_options = [option for option in options if option is not None]
+            start_raw = str(row.get("_startAt") or "")
+            end_raw = str(row.get("_endAt") or "")
+            start_dt = parse_date(start_raw)
+            end_dt = parse_date(end_raw)
+
+            pickup_cards: list[Any] = []
+            seen_cards: set[tuple[str, int]] = set()
+            for draw in draws:
+                if not draw.pickup or draw.card is None:
+                    continue
+                key = (draw.kind, draw.resource_id)
+                if key in seen_cards:
+                    continue
+                seen_cards.add(key)
+                pickup_cards.append(draw.card)
+            pickup_characters: list[Character] = []
+            seen_characters: set[int] = set()
+            for card in pickup_cards:
+                if isinstance(card, Card):
+                    candidates = [self.characters.get(card.character_id)]
+                else:
+                    candidates = list(card.characters)
+                for character in candidates:
+                    if character is None or character.id in seen_characters:
+                        continue
+                    seen_characters.add(character.id)
+                    pickup_characters.append(character)
+
+            search_parts = [
+                name,
+                self.all_text(name_text_id),
+                description,
+                self.all_text(description_text_id),
+                *(character.name for character in pickup_characters),
+                *(character.search_names for character in pickup_characters),
+                *(character.band_name for character in pickup_characters),
+                *(getattr(card, "title", "") for card in pickup_cards),
+                str(gacha_id),
+            ]
+            result.append(
+                Gacha(
+                    id=gacha_id,
+                    name=name,
+                    description=description,
+                    banner_url=banner,
+                    banner_fallback=banner_fallback,
+                    logo_url=logo,
+                    logo_fallback=logo_fallback,
+                    start_at=(
+                        start_dt.strftime("%Y/%m/%d %H:%M")
+                        if start_dt
+                        else start_raw
+                    ),
+                    end_at=(
+                        end_dt.strftime("%Y/%m/%d %H:%M") if end_dt else end_raw
+                    ),
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    is_limited=bool(row.get("_isLimited")),
+                    priority=int(row.get("_priority") or 0),
+                    member_count=sum(
+                        pool.count for pool in pools if pool.kind == "member"
+                    ),
+                    support_count=sum(
+                        pool.count for pool in pools if pool.kind == "support"
+                    ),
+                    item_count=sum(
+                        pool.count for pool in pools if pool.kind == "item"
+                    ),
+                    pools=pools,
+                    draws=draws,
+                    pickup_characters=pickup_characters,
+                    pickup_cards=pickup_cards,
+                    options=valid_options,
+                    bonuses=self._gacha_bonuses(
+                        row, bonuses, bonus_lots, items, slot_draws
+                    ),
+                    currency_label=self._gacha_currency(valid_options),
+                    search_text=" ".join(search_parts).lower(),
+                )
+            )
+        # Current pools first, then permanent ones, then upcoming and ended.
+        # Within a group the newest ID (the newest pool) comes first.
+        order = {"ongoing": 0, "permanent": 1, "upcoming": 2, "ended": 3}
+        result.sort(key=lambda gacha: gacha.id, reverse=True)
+        result.sort(key=lambda gacha: order.get(gacha.status, 4))
+        return result
 
 
 def catalog_stats(dataset: Dataset) -> dict[str, Any]:

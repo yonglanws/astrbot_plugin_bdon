@@ -38,6 +38,7 @@ from .bdon.constants import (
     DIFFICULTIES,
     DIFFICULTY_NAMES,
     EVENT_WIDTH,
+    GACHA_SEARCH_LIMIT,
     KIND_COMMANDS,
     KIND_LABELS,
     LIST_JPEG_QUALITY,
@@ -52,6 +53,12 @@ from .bdon.constants import (
     SYNC_COMMANDS,
     list_columns,
     resolve_region,
+)
+from .bdon.gacha import (
+    GachaStateStore,
+    default_gacha,
+    parse_sim_args,
+    perform_draw,
 )
 from .bdon.masterdata import MasterDataManager
 from .bdon.models import catalog_stats
@@ -68,6 +75,7 @@ KIND_ACCENTS = {
     "event": "#E05A7A",
     "event_list": "#E05A7A",
     "catalog": "#0072C2",
+    "gacha": "#B86BD8",
     "help": "#4C9DF0",
 }
 
@@ -168,6 +176,9 @@ class BdonPlugin(Star):
         # cached separately from the (size-limited) image cache.
         self.chart_dir = self.data_dir / "charts"
         self.chart_dir.mkdir(parents=True, exist_ok=True)
+        # Simulated pull counters survive a restart; the file is tiny and only
+        # written after a draw or a reset.
+        self.gacha_store = GachaStateStore(self.data_dir / "gacha_state.json")
 
         sources = self.config.get("data_source_bases") or list(DEFAULT_DATA_SOURCES)
         if not isinstance(sources, list):
@@ -323,6 +334,27 @@ class BdonPlugin(Star):
                 event, region, script, region_prefix, dataset, args
             ):
                 yield result
+            return
+
+        if kind in {"gacha", "gacha_sim", "gacha_reset"}:
+            try:
+                async for result in self._handle_gacha(
+                    event,
+                    region,
+                    script,
+                    region_prefix,
+                    dataset,
+                    kind,
+                    raw_command,
+                    args,
+                ):
+                    yield result
+            except RenderError as exc:
+                logger.warning("[bdon] gacha render failed: %s", exc)
+                yield event.plain_result(f"图片渲染失败：{exc}")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[bdon] gacha command failed")
+                yield event.plain_result(f"卡池操作失败：{exc}")
             return
 
         try:
@@ -661,6 +693,229 @@ class BdonPlugin(Star):
             yield event.plain_result(
                 f"「{song.title_for_search}」#{song.display_id} 暂无曲绘。"
             )
+
+    # -- 卡池 ------------------------------------------------------------------
+    @staticmethod
+    def _gacha_user(event: AstrMessageEvent) -> str:
+        """The sender key for the pull counters; one bucket per user."""
+        getter = getattr(event, "get_sender_id", None)
+        if callable(getter):
+            try:
+                value = getter()
+                if value:
+                    return str(value)
+            except Exception:  # noqa: BLE001 - older event implementations
+                pass
+        return "default"
+
+    @staticmethod
+    def _gacha_candidates_text(
+        resolved: Resolved, command: str, example_suffix: str = ""
+    ) -> str:
+        """Plain-text candidate list; a growing pool table never becomes an image."""
+        order = {"ongoing": 0, "permanent": 1, "upcoming": 2, "ended": 3}
+        candidates = sorted(
+            resolved.items,
+            key=lambda gacha: (order.get(gacha.status, 4), -gacha.id),
+        )
+        shown = candidates[:10]
+        lines = [
+            (
+                f"匹配到多个卡池（共 {resolved.total} 个），"
+                "请用更准确的名字或 ID："
+            )
+        ]
+        for gacha in shown:
+            if gacha.status == "permanent":
+                state = "常驻开放"
+            else:
+                state = f"{gacha.status_label} · {gacha.period_label}"
+            lines.append(f"· {gacha.name} #{gacha.id} · {state}")
+        if resolved.total > len(shown):
+            lines.append(f"……共 {resolved.total} 个")
+        lines.append(f"例如：{command} {shown[0].id}{example_suffix}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _gacha_by_query(gachas: list[Any], query: str) -> tuple[Any | None, str]:
+        """One pool for a simulation/reset, or a message when ambiguous."""
+        if not query:
+            gacha = default_gacha(gachas)
+            return gacha, "" if gacha is not None else "暂无卡池数据。"
+        resolved = resolve(gachas, query, page_size=LIST_PAGE_SIZE, kind="gacha")
+        if resolved.mode == "detail" and resolved.item is not None:
+            return resolved.item, ""
+        if resolved.items:
+            return None, BdonPlugin._gacha_candidates_text(
+                resolved, "模拟抽卡", " 10"
+            )
+        return None, f"没有找到匹配「{query}」的卡池。"
+
+    async def _handle_gacha(
+        self,
+        event: AstrMessageEvent,
+        region: str,
+        script: str,
+        region_prefix: str,
+        dataset: Any,
+        kind: str,
+        raw_command: str,
+        args: str,
+    ):
+        """``查卡池`` / ``模拟抽卡`` / ``重置抽卡``."""
+        gachas = list(getattr(dataset, "gachas", []) or [])
+        gacha_tables = (
+            "MasterGacha",
+            "MasterGachaLot",
+            "MasterGachaPrize",
+        )
+        if not gachas and not all(
+            self.manager.table_path(region, table).is_file()
+            for table in gacha_tables
+        ):
+            # The gacha tables are optional, so an install from before this
+            # feature keeps the required tables and get_dataset never re-syncs.
+            # A partial download is treated the same way.
+            try:
+                await self.manager.sync_region(region)
+                dataset = await self.manager.get_dataset(
+                    region, script, force_sync=True
+                )
+                gachas = list(getattr(dataset, "gachas", []) or [])
+            except Exception as exc:  # noqa: BLE001 - reported below
+                logger.warning("[bdon] gacha table sync failed: %s", exc)
+        if not gachas:
+            yield event.plain_result(
+                "卡池数据暂不可用，请让管理员发送「同步数据」后重试。"
+            )
+            return
+
+        if kind == "gacha_reset":
+            gacha, message = self._gacha_by_query(gachas, args.strip())
+            if gacha is None:
+                yield event.plain_result(message)
+                return
+            cleared = await self.gacha_store.reset(
+                self._gacha_user(event), gacha.id
+            )
+            if cleared:
+                yield event.plain_result(
+                    f"已重置「{gacha.name}」#{gacha.id} 的模拟抽卡记录，累计抽数归零。"
+                )
+            else:
+                yield event.plain_result(
+                    f"「{gacha.name}」#{gacha.id} 还没有模拟抽卡记录。"
+                )
+            return
+
+        if kind == "gacha_sim":
+            default_count = (
+                10
+                if any(
+                    word in raw_command
+                    for word in ("十连", "十連", "十抽", "十次")
+                )
+                else 1
+            )
+            query, count = parse_sim_args(args, default_count=default_count)
+            gacha, message = self._gacha_by_query(gachas, query)
+            if gacha is None:
+                yield event.plain_result(message)
+                return
+            results = perform_draw(gacha, count)
+            if not results:
+                yield event.plain_result(
+                    f"「{gacha.name}」#{gacha.id} 暂无可抽取内容。"
+                )
+                return
+            stats = await self.gacha_store.record(
+                self._gacha_user(event), gacha.id, results
+            )
+            context = self._base_context(
+                region,
+                script,
+                region_prefix,
+                "模拟抽卡",
+                KIND_ACCENTS["gacha"],
+                page_width=LIST_WIDTH,
+            )
+            context.update(
+                gacha=gacha,
+                results=results,
+                stats=stats,
+                count=len(results),
+            )
+            path = await self.renderer.render(
+                "gacha_result.html",
+                context,
+                width=LIST_WIDTH,
+                image_type="jpeg",
+                quality=LIST_JPEG_QUALITY,
+                scale=LIST_SCALE,
+            )
+            yield event.image_result(str(path))
+            return
+
+        # 查卡池: a unique hit (or the current pool with no query) opens the
+        # detail page; anything else is a normal search-results grid of the
+        # matches, capped so a generic keyword cannot overflow the image.
+        query = unicodedata.normalize("NFKC", args or "").strip()
+        if query:
+            resolved = resolve(gachas, query, page_size=LIST_PAGE_SIZE, kind="gacha")
+            if resolved.mode == "detail" and resolved.item is not None:
+                gacha = resolved.item
+            else:
+                items = resolved.items[:GACHA_SEARCH_LIMIT]
+                context = self._base_context(
+                    region,
+                    script,
+                    region_prefix,
+                    f"卡池搜索 · {resolved.query}",
+                    KIND_ACCENTS["gacha"],
+                    page_width=LIST_WIDTH,
+                )
+                context["resolved"] = Resolved(
+                    mode="list",
+                    query=resolved.query,
+                    items=items,
+                    total=resolved.total,
+                    suggestions=resolved.suggestions,
+                )
+                context["search_capped"] = resolved.total > len(items)
+                path = await self.renderer.render(
+                    "gacha_search.html",
+                    context,
+                    width=LIST_WIDTH,
+                    image_type="jpeg",
+                    quality=LIST_JPEG_QUALITY,
+                    scale=LIST_SCALE,
+                )
+                yield event.image_result(str(path))
+                return
+        else:
+            gacha = default_gacha(gachas)
+            if gacha is None:
+                yield event.plain_result("暂无卡池数据。")
+                return
+
+        context = self._base_context(
+            region,
+            script,
+            region_prefix,
+            "卡池详情",
+            KIND_ACCENTS["gacha"],
+            page_width=LIST_WIDTH,
+        )
+        context["gacha"] = gacha
+        path = await self.renderer.render(
+            "gacha_detail.html",
+            context,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            quality=LIST_JPEG_QUALITY,
+            scale=LIST_SCALE,
+        )
+        yield event.image_result(str(path))
 
     # -- raw artwork -----------------------------------------------------------
     async def _handle_art(

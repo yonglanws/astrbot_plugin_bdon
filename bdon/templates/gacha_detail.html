@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% from "_macros.html" import img, picture, section_title, rarity_mark %}
+{% block styles %}{% include "_gacha_styles.html" %}{% endblock %}
+{% block content %}
+<div class="gacha-page">
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">招募详情</div>
+    <h1 class="page-title">卡池详情</h1>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>#{{ gacha.id }}</b><span>卡池 ID</span></div>
+    <div class="page-hint"><b>{{ region_prefix }}查卡池 卡池名/角色/ID</b> 搜索其他卡池</div>
+  </div>
+</header>
+
+<div class="gacha-hero {{ gacha.status_class }}">
+  {{ img(gacha.banner_url, gacha.banner_fallback, gacha.name, 'hero-bg') }}
+  <div class="gacha-state">
+    <span class="state-pill status-pill">{{ gacha.status_label }}</span>
+    {% if gacha.is_limited %}<span class="state-pill soft">限定</span>{% endif %}
+  </div>
+  <div class="gacha-hero-inner">
+    {% if gacha.logo_url %}{{ img(gacha.logo_url, gacha.logo_fallback, gacha.name, 'gacha-logo') }}{% endif %}
+    <h1 class="gacha-title">{{ gacha.name }}</h1>
+    <div class="gacha-meta">
+      <span class="chip">#{{ gacha.id }}</span>
+      <span class="chip">{{ gacha.period_label }}</span>
+      <span class="chip">{{ gacha.currency_label }}</span>
+      <span class="chip">成员卡 {{ gacha.member_count }}</span>
+      <span class="chip">支援卡 {{ gacha.support_count }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="gacha-info">
+  <div class="info-box">
+    <div class="info-label">开放时间</div>
+    <div class="info-value">{{ gacha.period_label }}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">招募类型</div>
+    <div class="info-value">{{ gacha.currency_label }}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">卡池内容</div>
+    <div class="info-value">成员卡 {{ gacha.member_count }} · 支援卡 {{ gacha.support_count }}{% if gacha.item_count %} · 道具 {{ gacha.item_count }}{% endif %}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-label">十连保底</div>
+    <div class="info-value">{{ gacha.guarantee_label or '—' }}</div>
+  </div>
+</div>
+
+{% if gacha.description %}<div class="gacha-desc">{{ gacha.description }}</div>{% endif %}
+
+<div class="gacha-columns">
+  <div class="gacha-main">
+    {{ section_title('出现概率', '单抽基准') }}
+    <div class="gacha-panel">
+      {% for pool in gacha.pools %}
+      <div class="rate-row">
+        <div class="rate-kind">
+          {% if pool.rarity_icon %}<img class="rate-icon" src="{{ pool.rarity_icon }}" alt="{{ pool.rarity_label }}" onerror="this.style.display='none'">{% endif %}
+          <span class="rate-kind-label">{{ pool.kind_label }}</span>
+          {% if pool.rarity_label %}<span class="rate-rarity" style="color:{{ pool.rarity_color }}">{{ pool.rarity_label }}</span>{% endif %}
+        </div>
+        <div class="rate-bar"><span style="width:{{ (pool.rate / gacha.max_pool_rate * 100) | round(1) }}%;background:{{ pool.rarity_color }}"></span></div>
+        <div class="rate-value">{{ pool.rate_label }}</div>
+        <div class="rate-count">{{ pool.count }} 种{% if pool.pickup_label %} · {{ pool.pickup_label }}{% endif %}</div>
+      </div>
+      {% endfor %}
+      <div class="rate-note">概率为单抽基准；{% if gacha.has_ten_guarantee %}十连最后 1 抽保底 SR 以上。{% else %}本卡池没有十连保底。{% endif %}</div>
+    </div>
+
+    {% if gacha.pickup_cards %}
+    {{ section_title('Pick Up', gacha.pickup_characters | map(attribute='name') | join(' · ')) }}
+    {% if gacha.pickup_cards | length == 1 %}
+      {% set card = gacha.pickup_cards[0] %}
+      <article class="pickup-feature">
+        <div class="pickup-cover">
+          {{ picture(card.thumb_url, card.thumb_fallback, card.title, '', '★') }}
+          {{ rarity_mark(card.rarity_icon, card.rarity_label) }}
+          <span class="pickup-tag">PICK UP</span>
+        </div>
+        <div class="pickup-info">
+          <div class="pickup-title">{{ card.title }}</div>
+          <div class="pickup-sub">{% if card.character_name %}{{ card.character_name }}{% elif card.characters %}{{ card.characters | map(attribute='name') | join(' / ') }}{% endif %}</div>
+          <div class="pickup-tags">
+            <span class="rarity" style="--rarity:{{ card.rarity_color }}">{{ card.rarity_label }}</span>
+            {% if card.type_label %}<span class="chip">{{ card.type_label }}</span>{% endif %}
+            <span class="chip">{% if card.character_name %}成员卡{% else %}支援卡{% endif %}</span>
+          </div>
+          <div class="pickup-note">本期 Pick Up 卡牌；具体出现概率见上方「出现概率」。</div>
+        </div>
+      </article>
+    {% else %}
+    <div class="pickup-grid">
+      {% for card in gacha.pickup_cards %}
+      <article class="pickup-card">
+        <div class="pickup-cover">
+          {{ picture(card.thumb_url, card.thumb_fallback, card.title, '', '★') }}
+          {{ rarity_mark(card.rarity_icon, card.rarity_label) }}
+          <span class="pickup-tag">PICK UP</span>
+        </div>
+        <div class="pickup-body">
+          <div class="pickup-title">{{ card.title }}</div>
+          <div class="pickup-sub">{% if card.character_name %}{{ card.character_name }}{% elif card.characters %}{{ card.characters | map(attribute='name') | join(' / ') }}{% endif %}</div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <aside class="gacha-side">
+    {{ section_title('招募选项') }}
+    <div class="option-grid">
+      {% for option in gacha.options %}
+      <div class="option-card">
+        <div class="option-label">{{ option.label }}</div>
+        <div class="option-price">{% if option.price > 0 %}{{ option.price_label }} <small>{{ option.currency }}</small>{% else %}免费{% endif %}</div>
+        <div class="option-tags">
+          {% if option.first_time_label %}<span class="chip">{{ option.first_time_label }}</span>{% endif %}
+          {% if option.guarantee %}<span class="chip">{{ option.guarantee }}</span>{% endif %}
+          {% if option.limit_label %}<span class="chip">{{ option.limit_label }}</span>{% endif %}
+          {% if option.point %}<span class="chip">+{{ option.point }} pt</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if gacha.bonuses %}
+    {{ section_title('额外奖励') }}
+    <div class="bonus-panel">
+      {% for bonus in gacha.bonuses %}
+      <div class="bonus-row">
+        <div class="bonus-thumb">{% if bonus.item_icon %}<img src="{{ bonus.item_icon }}" alt="{{ bonus.item_name }}" onerror="this.style.display='none'">{% else %}★{% endif %}</div>
+        <div class="bonus-main">
+          <div class="bonus-name">{{ bonus.item_name }}</div>
+          <div class="bonus-sub">{{ bonus.label }}</div>
+        </div>
+        <div class="bonus-rate">{{ bonus.count_label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="sim-panel">
+      <div class="sim-title">模拟抽卡</div>
+      <div class="sim-line"><b>{{ region_prefix }}模拟抽卡 {{ gacha.id }}</b> 单抽</div>
+      {% if gacha.has_ten_option %}<div class="sim-line"><b>{{ region_prefix }}模拟抽卡 {{ gacha.id }} 10</b> 十连</div>{% endif %}
+      <div class="sim-line"><b>{{ region_prefix }}重置抽卡 {{ gacha.id }}</b> 清零抽数</div>
+      <div class="sim-note">{% if gacha.has_ten_guarantee %}十连最后 1 抽保底 SR 以上；{% endif %}概率与游戏内公示一致，结果仅供娱乐。</div>
+    </div>
+  </aside>
+</div>
+</div>
+{% endblock %}

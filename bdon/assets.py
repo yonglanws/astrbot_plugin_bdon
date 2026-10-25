@@ -134,6 +134,12 @@ class AssetBuilder:
     def event_banner(self, asset_path: str) -> tuple[str, str]:
         return self.pair(f"Image/Event/{asset_path}.png") if asset_path else ("", "")
 
+    def gacha_banner(self, asset_path: str) -> tuple[str, str]:
+        return self.pair(f"{asset_path}.png") if asset_path else ("", "")
+
+    def gacha_logo(self, asset_path: str) -> tuple[str, str]:
+        return self.pair(f"{asset_path}.png") if asset_path else ("", "")
+
     def item(self, image_path: str) -> tuple[str, str]:
         return self.pair(f"{image_path}.png") if image_path else ("", "")
 

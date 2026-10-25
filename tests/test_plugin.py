@@ -157,6 +157,16 @@ def test_patterns() -> None:
         "查铺面 迷星叫": ("", "查铺面", "迷星叫"),
         "铺面查询 迷星叫": ("", "铺面查询", "迷星叫"),
         "铺面预览 迷星叫": ("", "铺面预览", "迷星叫"),
+        "查卡池": ("", "查卡池", ""),
+        "cn查卡池 和泉朋花": ("cn", "查卡池", "和泉朋花"),
+        "招募": ("", "招募", ""),
+        "gacha": ("", "gacha", ""),
+        "模拟抽卡 15 10": ("", "模拟抽卡", "15 10"),
+        "模拟十连": ("", "模拟十连", ""),
+        "十连": ("", "十连", ""),
+        "单抽": ("", "单抽", ""),
+        "重置抽卡 15": ("", "重置抽卡", "15"),
+        "重置招募": ("", "重置招募", ""),
         "帮助": ("", "帮助", ""),
         "cn帮助": ("cn", "帮助", ""),
         "jp帮助": ("jp", "帮助", ""),
@@ -202,6 +212,134 @@ def test_layout() -> None:
     assert list_columns("event", 3) == 2
     assert list_columns("event", 1) == 1
     print("layout tests passed")
+
+
+def test_gacha_engine() -> None:
+    from astrbot_plugin_bdon.bdon.gacha import (
+        GachaStateStore,
+        GachaStats,
+        parse_sim_args,
+        perform_draw,
+    )
+    from astrbot_plugin_bdon.bdon.models import Gacha, GachaDraw, GachaOption
+
+    def draw(kind: str, resource_id: int, rarity: int, weight: float) -> GachaDraw:
+        return GachaDraw(
+            kind=kind,
+            resource_id=resource_id,
+            amount=1,
+            rarity=rarity,
+            weight=weight,
+            pickup=False,
+        )
+
+    gacha = Gacha(
+        id=15,
+        name="Test",
+        description="",
+        banner_url="",
+        banner_fallback="",
+        logo_url="",
+        logo_fallback="",
+        start_at="",
+        end_at="",
+        start_dt=None,
+        end_dt=None,
+        is_limited=False,
+        priority=0,
+        member_count=3,
+        support_count=1,
+        item_count=0,
+        pools=[],
+        # The last entry of the full pool is R, while the guarantee pool's last
+        # entry is SR: a "roll the last candidate" RNG proves the last draw of a
+        # ten-pull comes from the guarantee subset.
+        draws=[
+            draw("member", 1, 4, 100),
+            draw("member", 2, 3, 300),
+            draw("support", 3, 3, 100),
+            draw("member", 4, 2, 9500),
+        ],
+        pickup_characters=[],
+        pickup_cards=[],
+        options=[
+            GachaOption(
+                slot=1,
+                label="招募10次",
+                draw_count=10,
+                currency="星钻",
+                price=2000,
+                first_time_price=None,
+                guarantee="保底 1 张 SR 以上",
+                limit_label="",
+                point=10,
+                guarantee_rarity=3,
+            )
+        ],
+        bonuses=[],
+    )
+
+    class LastCandidate:
+        def random(self) -> float:
+            return 0.999999
+
+    single = perform_draw(gacha, 1, LastCandidate())
+    assert len(single) == 1
+    assert single[0].draw.rarity == 2 and not single[0].guaranteed
+
+    assert gacha.has_ten_guarantee
+    assert gacha.ten_guarantee_rarity == 3
+    ten = perform_draw(gacha, 10, LastCandidate())
+    assert len(ten) == 10
+    assert all(result.draw.rarity == 2 for result in ten[:9])
+    assert all(not result.guaranteed for result in ten[:9])
+    assert ten[-1].guaranteed and ten[-1].draw.rarity >= 3
+
+    # A pool without a ten-pull guarantee (or with no ten-pull option at all)
+    # must not invent one: every draw comes from the full weighted pool.
+    from dataclasses import replace
+
+    plain = replace(gacha, options=[])
+    assert not plain.has_ten_guarantee
+    ten_plain = perform_draw(plain, 10, LastCandidate())
+    assert all(result.draw.rarity == 2 for result in ten_plain)
+    assert not any(result.guaranteed for result in ten_plain)
+
+    stats = GachaStats()
+    stats.record(ten)
+    assert stats.pulls == 10
+    assert (stats.ssr_count, stats.sr_count, stats.r_count) == (0, 1, 9)
+    assert stats.sr_rate_label == "10.0%"
+    assert {row["label"] for row in stats.rarity_rows()} == {"R", "SR"}
+
+    # Argument parsing: a trailing 1/10 is a count, other numbers are pool IDs.
+    assert parse_sim_args("10") == ("", 10)
+    assert parse_sim_args("15") == ("15", 1)
+    assert parse_sim_args("#15 10") == ("15", 10)
+    assert parse_sim_args("和泉朋花 10") == ("和泉朋花", 10)
+    assert parse_sim_args("十连") == ("", 10)
+    assert parse_sim_args("Happy Birthday 26-27") == ("Happy Birthday 26-27", 1)
+    assert parse_sim_args("", default_count=10) == ("", 10)
+
+    async def run_store() -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gacha_state.json"
+            store = GachaStateStore(path)
+            saved = await store.record("user-1", 15, ten)
+            assert saved.pulls == 10 and saved.sr_count == 1
+            assert path.is_file()
+            # A fresh store reads the counters back from disk.
+            reloaded = GachaStateStore(path)
+            assert (await reloaded.stats("user-1", 15)).pulls == 10
+            assert await reloaded.reset("user-1", 15) is True
+            assert (await reloaded.stats("user-1", 15)).pulls == 0
+            assert await reloaded.reset("user-1", 15) is False
+
+    asyncio.run(run_store())
+    print("gacha engine tests passed")
 
 
 def test_plugin() -> None:
@@ -296,6 +434,14 @@ def test_plugin() -> None:
 
             plugin._load_chart_score = fake_chart_score  # type: ignore[assignment]
 
+            # Keep simulated pull counters out of the real plugin data dir and
+            # start every run from zero.
+            from astrbot_plugin_bdon.bdon.gacha import GachaStateStore
+
+            gacha_state = output.parent / "gacha-state-test.json"
+            gacha_state.unlink(missing_ok=True)
+            plugin.gacha_store = GachaStateStore(gacha_state)
+
             cases = [
                 ("查歌 迷星叫", "song_detail.html", "song"),
                 ("cn查歌 迷星叫", "song_detail.html", "song"),
@@ -327,6 +473,19 @@ def test_plugin() -> None:
                 ("cn帮助", "help.html", None),
                 ("help", "help.html", None),
             ]
+            # The gacha tables are optional, so a partial local cache may not
+            # have them; the engine test above still covers the simulation.
+            if dataset.gachas:
+                cases.extend(
+                    [
+                        ("查卡池", "gacha_detail.html", "gacha"),
+                        ("查卡池 15", "gacha_detail.html", "gacha"),
+                        ("查卡池 和泉朋花", "gacha_detail.html", "gacha"),
+                        ("查卡池 Happy Birthday", "gacha_search.html", None),
+                        ("查卡池 招募", "gacha_search.html", None),
+                        ("模拟抽卡 15 10", "gacha_result.html", "gacha"),
+                    ]
+                )
             for text, template, key in cases:
                 event = FakeEvent(text)
                 results = [result async for result in plugin.on_bdon_message(event)]
@@ -386,6 +545,112 @@ def test_plugin() -> None:
                         item.id,
                         skill.label,
                     )
+
+            # 卡池: the lot weights become the displayed single-pull rates, and
+            # the ten-pull product carries the SR guarantee.
+            if dataset.gachas:
+                assert len(dataset.gachas) == 15
+                gacha_15 = next(
+                    gacha for gacha in dataset.gachas if gacha.id == 15
+                )
+                assert (gacha_15.member_count, gacha_15.support_count) == (65, 64)
+                assert [
+                    (pool.kind_label, pool.rarity_label, pool.rate_label)
+                    for pool in gacha_15.pools
+                ] == [
+                    ("成员卡", "生日", "3.0%"),
+                    ("成员卡", "SSR", "2.0%"),
+                    ("成员卡", "SR", "8.5%"),
+                    ("成员卡", "R", "36.5%"),
+                    ("支援卡", "SSR", "4.0%"),
+                    ("支援卡", "SR", "17.0%"),
+                    ("支援卡", "R", "29.0%"),
+                ]
+                assert abs(sum(pool.rate for pool in gacha_15.pools) - 100) < 1e-6
+                assert gacha_15.pickup_characters[0].name == "和泉朋花"
+                assert gacha_15.options[-1].guarantee == "保底 1 张 SR 以上"
+                assert (
+                    gacha_15.period_label
+                    == "2026/10/24 00:00 – 2026/10/26 23:59"
+                )
+                assert gacha_15.currency_label == "星钻"
+                assert "和泉朋花" in gacha_15.search_text
+                # The ad-only pool sells no ten-pull, so it must not advertise
+                # or grant a ten-pull guarantee.
+                gacha_9 = next(
+                    gacha for gacha in dataset.gachas if gacha.id == 9
+                )
+                assert not gacha_9.has_ten_option
+                assert not gacha_9.has_ten_guarantee
+                assert gacha_9.ten_guarantee_rarity == 0
+
+                from astrbot_plugin_bdon.bdon.search import resolve
+
+                # Character-name search reaches the pool's Pick Up characters.
+                hit = resolve(dataset.gachas, "和泉朋花", kind="gacha")
+                assert hit.mode == "detail" and hit.item.id == 15
+                assert resolve(dataset.gachas, "15", kind="gacha").item.id == 15
+
+                # The simulated ten-pull was recorded under the test user.
+                result_context = next(
+                    context
+                    for template, context in captured
+                    if template == "gacha_result.html"
+                )
+                assert result_context["count"] == 10
+                assert result_context["stats"].pulls == 10
+                assert result_context["stats"].rarity_rows()
+
+                event = FakeEvent("模拟抽卡 Happy Birthday")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[0][0] == "plain" and "多个卡池" in results[0][1]
+
+                # A multi-hit lookup is a normal search-results grid over the
+                # matches only; the grid is capped so a generic keyword cannot
+                # overflow the image as pools accumulate.
+                event = FakeEvent("查卡池 Happy Birthday")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[-1][0] == "image"
+                assert captured[-1][0] == "gacha_search.html"
+                assert captured[-1][1]["resolved"].total == 2
+                assert captured[-1][1]["search_capped"] is False
+
+                event = FakeEvent("查卡池 招募")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[-1][0] == "image"
+                assert captured[-1][0] == "gacha_search.html"
+                assert captured[-1][1]["resolved"].total == 15
+                assert len(captured[-1][1]["resolved"].items) == 12
+                assert captured[-1][1]["search_capped"] is True
+
+                event = FakeEvent("重置抽卡 15")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[0][0] == "plain" and "已重置" in results[0][1]
+
+                event = FakeEvent("模拟抽卡 15")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[-1][0] == "image"
+                assert captured[-1][0] == "gacha_result.html"
+                assert captured[-1][1]["count"] == 1
+                assert captured[-1][1]["stats"].pulls == 1
+
+                event = FakeEvent("查卡池 不存在的卡池zzz")
+                results = [
+                    result async for result in plugin.on_bdon_message(event)
+                ]
+                assert results[-1][0] == "image"
+                assert captured[-1][0] == "gacha_search.html"
+                assert not captured[-1][1]["resolved"].items
 
             # 查谱面: argument parsing and offline-safe routes (the score
             # download itself is covered by tests/test_chart.py fixtures).
@@ -721,4 +986,5 @@ if __name__ == "__main__":
     test_builtin_renderer()
     test_icons()
     test_layout()
+    test_gacha_engine()
     test_plugin()

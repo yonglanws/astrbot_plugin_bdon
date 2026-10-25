@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from bdon.constants import (  # noqa: E402
     DEFAULT_DATA_SOURCES,
     DETAIL_WIDTH,
     EVENT_WIDTH,
+    GACHA_SEARCH_LIMIT,
     LIST_PAGE_SIZE,
     LIST_SCALE,
     LIST_WIDTH,
@@ -47,6 +49,7 @@ KIND_ACCENTS = {
     "comic": "#FF8899",
     "event": "#E05A7A",
     "catalog": "#0072C2",
+    "gacha": "#B86BD8",
     "help": "#4C9DF0",
 }
 OUTPUT = ROOT / "tests" / "output"
@@ -418,6 +421,91 @@ async def main(region: str) -> None:
             "event_list.html",
             ctx,
             width=EVENT_WIDTH,
+            image_type="jpeg",
+            scale=LIST_SCALE,
+        )
+
+    # 卡池: list, detail and both simulation result layouts.
+    if dataset.gachas:
+        from bdon.gacha import GachaStats, perform_draw  # noqa: E402
+
+        gacha = next(
+            (entry for entry in dataset.gachas if entry.id == 15),
+            dataset.gachas[0],
+        )
+
+        ctx = base_context(manager, region, "卡池详情", KIND_ACCENTS["gacha"])
+        ctx["gacha"] = gacha
+        await render(
+            "gacha_detail",
+            "gacha_detail.html",
+            ctx,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            scale=LIST_SCALE,
+        )
+
+        for name, query in (
+            ("gacha_search", "Happy Birthday"),
+            ("gacha_search_capped", "招募"),
+        ):
+            resolved = resolve(
+                dataset.gachas, query, page_size=LIST_PAGE_SIZE, kind="gacha"
+            )
+            items = resolved.items[:GACHA_SEARCH_LIMIT]
+            ctx = base_context(
+                manager,
+                region,
+                f"卡池搜索 · {resolved.query}",
+                KIND_ACCENTS["gacha"],
+            )
+            ctx["resolved"] = replace(resolved, items=items)
+            ctx["search_capped"] = resolved.total > len(items)
+            await render(
+                name,
+                "gacha_search.html",
+                ctx,
+                width=LIST_WIDTH,
+                image_type="jpeg",
+                scale=LIST_SCALE,
+            )
+
+        stats = GachaStats()
+        results = perform_draw(gacha, 10)
+        stats.record(results)
+        ctx = base_context(manager, region, "模拟抽卡", KIND_ACCENTS["gacha"])
+        ctx.update(
+            gacha=gacha,
+            results=results,
+            stats=stats,
+            count=len(results),
+            prefix="",
+        )
+        await render(
+            "gacha_ten",
+            "gacha_result.html",
+            ctx,
+            width=LIST_WIDTH,
+            image_type="jpeg",
+            scale=LIST_SCALE,
+        )
+
+        stats = GachaStats()
+        results = perform_draw(gacha, 1)
+        stats.record(results)
+        ctx = base_context(manager, region, "模拟抽卡", KIND_ACCENTS["gacha"])
+        ctx.update(
+            gacha=gacha,
+            results=results,
+            stats=stats,
+            count=1,
+            prefix="",
+        )
+        await render(
+            "gacha_single",
+            "gacha_result.html",
+            ctx,
+            width=LIST_WIDTH,
             image_type="jpeg",
             scale=LIST_SCALE,
         )

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% from "_macros.html" import picture, rarity_mark, char_face %}
+{% block styles %}{% include "_gacha_styles.html" %}{% endblock %}
+{% block content %}
+<div class="gacha-page">
+<header class="page-head">
+  <div class="head-main">
+    <div class="kicker">{{ '十连' if count >= 10 else '单抽' }} · 模拟抽卡</div>
+    <h1 class="page-title">{{ gacha.name }}</h1>
+    <div class="page-sub">第 {{ stats.pulls - count + 1 }} – {{ stats.pulls }} 抽 · 本次 {{ count }} 抽</div>
+  </div>
+  <div class="page-side">
+    <div class="count-block"><b>{{ stats.pulls }}</b><span>累计抽数</span></div>
+    <div class="page-hint">{% if gacha.has_ten_option %}<b>{{ region_prefix }}模拟抽卡 {{ gacha.id }} 10</b> 再来十连 · {% endif %}<b>{{ region_prefix }}重置抽卡 {{ gacha.id }}</b> 清零</div>
+  </div>
+</header>
+
+{% if count == 1 %}
+  {% set result = results[0] %}
+  <div class="draw-single">
+    <article class="draw-art-card">
+      <div class="draw-art {{ 'wide' if result.draw.kind == 'support' else ('square' if result.draw.kind == 'item' else 'portrait') }}">
+        {{ picture(result.art_url, result.art_fallback, result.name, '', '★') }}
+      </div>
+      <div class="draw-art-badge">
+        {% if result.rarity_label %}<span class="rarity" style="--rarity:{{ result.rarity_color }}">{{ result.rarity_label }}</span>{% endif %}
+        {% if result.pickup %}<span class="pickup-badge" style="position:static">PICK UP</span>{% endif %}
+      </div>
+    </article>
+    <div class="draw-single-info">
+      <div class="draw-kicker">{{ result.kind_label }} · 第 {{ result.index }} 抽</div>
+      <div class="draw-name">{{ result.name }}</div>
+      <div class="draw-sub">{{ result.subtitle }}</div>
+      <div class="draw-meta">
+        {% if result.rarity_label %}<span class="chip">{{ result.rarity_label }}</span>{% endif %}
+        <span class="chip">单抽概率 {{ result.draw.rate_label }}</span>
+        {% if result.guaranteed %}<span class="chip">十连保底</span>{% endif %}
+      </div>
+      <div class="draw-stats">
+        <div class="stat">
+          <div class="stat-label">累计抽数</div>
+          <div class="stat-value">{{ stats.pulls }}</div>
+          <div class="stat-note">本卡池</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">SSR</div>
+          <div class="stat-value">{{ stats.ssr_count }}</div>
+          <div class="stat-note">{{ stats.ssr_rate_label }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">SR</div>
+          <div class="stat-value">{{ stats.sr_count }}</div>
+          <div class="stat-note">{{ stats.sr_rate_label }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">R</div>
+          <div class="stat-value">{{ stats.r_count }}</div>
+          <div class="stat-note">{{ stats.r_rate_label }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Pick Up</div>
+          <div class="stat-value">{{ stats.pickups }}</div>
+          <div class="stat-note">累计</div>
+        </div>
+      </div>
+      <div class="sim-note">抽数会一直累计到发送「{{ region_prefix }}重置抽卡 {{ gacha.id }}」为止。</div>
+    </div>
+  </div>
+{% else %}
+  <div class="draw-grid">
+    {% for result in results %}
+    <article class="draw-card{% if result.pickup %} is-pickup{% endif %}" style="--rarity:{{ result.rarity_color }}">
+      <div class="draw-cover">
+        {{ picture(result.image_url, result.image_fallback, result.name, '', '★') }}
+        {{ rarity_mark(result.rarity_icon, result.rarity_label) }}
+        <span class="draw-index">{{ result.index }}</span>
+        {% if result.pickup %}<span class="pickup-badge">PICK UP</span>{% endif %}
+      </div>
+      <div class="draw-body">
+        <div class="draw-rarity">{{ result.rarity_label }}{% if result.rarity_label %} · {% endif %}{{ result.kind_label }}</div>
+        <div class="draw-name">{{ result.name }}</div>
+        <div class="draw-sub">{{ result.subtitle }}</div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if count > 1 %}
+<div class="result-strip">
+  <div class="result-stat"><span>累计抽数</span><b>{{ stats.pulls }}</b></div>
+  <div class="result-stat"><span>SSR</span><b>{{ stats.ssr_count }}</b><small>{{ stats.ssr_rate_label }}</small></div>
+  <div class="result-stat"><span>SR</span><b>{{ stats.sr_count }}</b><small>{{ stats.sr_rate_label }}</small></div>
+  <div class="result-stat"><span>R</span><b>{{ stats.r_count }}</b><small>{{ stats.r_rate_label }}</small></div>
+  <div class="result-stat"><span>Pick Up</span><b>{{ stats.pickups }}</b><small>累计</small></div>
+</div>
+{% endif %}
+
+<div class="result-columns">
+  <div class="gacha-panel">
+    <div class="panel-title">本卡池概率</div>
+    {% for pool in gacha.pools %}
+    <div class="rate-row compact">
+      <div class="rate-kind">
+        {% if pool.rarity_icon %}<img class="rate-icon" src="{{ pool.rarity_icon }}" alt="{{ pool.rarity_label }}" onerror="this.style.display='none'">{% endif %}
+        <span class="rate-kind-label">{{ pool.kind_label }}</span>
+        {% if pool.rarity_label %}<span class="rate-rarity" style="color:{{ pool.rarity_color }}">{{ pool.rarity_label }}</span>{% endif %}
+      </div>
+      <div class="rate-bar"><span style="width:{{ (pool.rate / gacha.max_pool_rate * 100) | round(1) }}%;background:{{ pool.rarity_color }}"></span></div>
+      <div class="rate-value">{{ pool.rate_label }}</div>
+    </div>
+    {% endfor %}
+    <div class="rate-note">概率为单抽基准；{% if gacha.has_ten_guarantee %}十连最后 1 抽保底 SR 以上。{% else %}本卡池没有十连保底。{% endif %}</div>
+  </div>
+  <div class="gacha-panel">
+    <div class="panel-title">累计稀有度</div>
+    <div class="rarity-strip">
+      {% for row in stats.rarity_rows() %}
+      <span class="rarity-chip" style="--rarity:{{ row.color }}">{{ row.kind_label }}{% if row.label %} {{ row.label }}{% endif %} ×{{ row.count }}</span>
+      {% endfor %}
+    </div>
+    {% if gacha.pickup_characters %}
+    <div class="panel-title" style="margin-top:16px">本期 Pick Up</div>
+    <div class="char-row">
+      {% for character in gacha.pickup_characters[:6] %}{{ char_face(character) }}{% endfor %}
+    </div>
+    {% endif %}
+    <div class="rate-note">抽数记录保存在本机，机器人重启后仍会保留。</div>
+  </div>
+</div>
+</div>
+{% endblock %}
