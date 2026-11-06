@@ -428,7 +428,25 @@ KIND_COMMANDS: dict[str, str] = {
 
 SYNC_COMMANDS: tuple[str, ...] = ("同步数据", "同步masterdata")
 
+MASTERDATA_REPO = "StarMoe-org/moenotes-masterdata"
+MASTERDATA_REF = "main"
+
+# GitHub is read through three transports, tried in this order: the contents API
+# always serves the newest commit, raw.githubusercontent is the direct fallback
+# (and the one without a small hourly quota), and the jsDelivr mirrors absorb
+# blocked or rate-limited networks.
 DEFAULT_DATA_SOURCES: tuple[str, ...] = (
+    f"https://api.github.com/repos/{MASTERDATA_REPO}",
+    f"https://raw.githubusercontent.com/{MASTERDATA_REPO}/{MASTERDATA_REF}",
+    f"https://cdn.jsdelivr.net/gh/{MASTERDATA_REPO}@{MASTERDATA_REF}",
+    f"https://gcore.jsdelivr.net/gh/{MASTERDATA_REPO}@{MASTERDATA_REF}",
+    f"https://fastly.jsdelivr.net/gh/{MASTERDATA_REPO}@{MASTERDATA_REF}",
+)
+
+# Earlier releases shipped this list as the config default. AstrBot persists
+# defaults into the user's config, so an upgraded install would keep the old
+# order forever unless an untouched list is recognised and replaced.
+LEGACY_DATA_SOURCES: tuple[str, ...] = (
     "https://cdn.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
     "https://gcore.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
     "https://fastly.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",

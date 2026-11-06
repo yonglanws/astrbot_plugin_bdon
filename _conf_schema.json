@@ -47,12 +47,13 @@
     "description": "MasterData 下载源（按顺序尝试）",
     "type": "list",
     "default": [
+      "https://api.github.com/repos/StarMoe-org/moenotes-masterdata",
+      "https://raw.githubusercontent.com/StarMoe-org/moenotes-masterdata/main",
       "https://cdn.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
       "https://gcore.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
-      "https://fastly.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main",
-      "https://raw.githubusercontent.com/StarMoe-org/moenotes-masterdata/main"
+      "https://fastly.jsdelivr.net/gh/StarMoe-org/moenotes-masterdata@main"
     ],
     "items": { "type": "string" },
-    "hint": "默认使用 jsDelivr 镜像；可替换为自己搭建的镜像或本地 HTTP 服务。"
+    "hint": "默认依次尝试 GitHub API、GitHub Raw、jsDelivr 加速；API 配额用尽时自动改用 Raw。可替换为自己搭建的镜像或本地 HTTP 服务。"
   }
 }

@@ -114,6 +114,72 @@ def test_public_url_filter() -> None:
         assert not is_public_http_url(blocked), blocked
 
 
+def test_data_source_order() -> None:
+    import tempfile
+
+    from astrbot_plugin_bdon.bdon.constants import (
+        DEFAULT_DATA_SOURCES,
+        LEGACY_DATA_SOURCES,
+    )
+    from astrbot_plugin_bdon.bdon.masterdata import (
+        MasterDataError,
+        MasterDataManager,
+        source_request,
+    )
+
+    # GitHub API first, raw second, then the acceleration mirrors.
+    assert DEFAULT_DATA_SOURCES[0] == (
+        "https://api.github.com/repos/StarMoe-org/moenotes-masterdata"
+    )
+    assert DEFAULT_DATA_SOURCES[1].startswith("https://raw.githubusercontent.com/")
+    assert all("jsdelivr" in source for source in DEFAULT_DATA_SOURCES[2:])
+
+    api = DEFAULT_DATA_SOURCES[0]
+    url, headers = source_request(api, "hk-tw-mo/MasterText.json")
+    assert url == (
+        "https://api.github.com/repos/StarMoe-org/moenotes-masterdata"
+        "/contents/hk-tw-mo/MasterText.json?ref=main"
+    )
+    assert headers["Accept"] == "application/vnd.github.raw"
+
+    # A ref can be pinned in the source URL, and plain mirrors stay untouched.
+    url, _ = source_request(f"{api}?ref=dev", "current_version.json")
+    assert url.endswith("/contents/current_version.json?ref=dev")
+    raw, headers = source_request(DEFAULT_DATA_SOURCES[1], "jp/MasterLiveMusic.json")
+    assert raw.endswith("/main/jp/MasterLiveMusic.json") and headers == {}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # An untouched config written by an older release is upgraded in place,
+        # while a custom list keeps the administrator's order.
+        legacy = MasterDataManager(tmp, "https://assets.bdon.moe", LEGACY_DATA_SOURCES)
+        assert tuple(legacy.sources) == DEFAULT_DATA_SOURCES
+
+        custom = MasterDataManager(
+            tmp, "https://assets.bdon.moe", ["https://mirror.example.com/data/"]
+        )
+        assert custom.sources == ["https://mirror.example.com/data"]
+
+        class _Response:
+            headers = {
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "9999999999",
+            }
+
+        custom._note_github_quota(api, _Response())  # type: ignore[arg-type]
+        assert custom._api_blocked_until > 0
+        custom.sources = [api, DEFAULT_DATA_SOURCES[1]]
+
+        async def fetch_blocked() -> str:
+            try:
+                await custom._fetch_source(api, "hk-tw-mo/MasterText.json")
+            except MasterDataError as exc:
+                return str(exc)
+            return ""
+
+        # A spent quota skips the API without spending a request.
+        assert "配额" in asyncio.run(fetch_blocked())
+
+
 def test_patterns() -> None:
     cases = {
         "查歌": ("", "查歌", ""),
@@ -722,9 +788,21 @@ def test_plugin() -> None:
 
             # Event data comes from MasterEvent plus its bonus/reward tables.
             assert len(dataset.events) == 3
-            current_events = [event for event in dataset.events if event.status == "ongoing"]
-            assert len(current_events) == 1
-            current_event = current_events[0]
+            # The bundled snapshot keeps ageing, so mirror the resolver's
+            # fallback (ongoing, else nearest upcoming, else latest ended)
+            # instead of requiring an event to still be running.
+            current = [event for event in dataset.events if event.status == "ongoing"]
+            upcoming = sorted(
+                (event for event in dataset.events if event.status == "upcoming"),
+                key=lambda event: event.start_dt,
+            )
+            current_event = (
+                current[0]
+                if current
+                else upcoming[0]
+                if upcoming
+                else max(dataset.events, key=lambda event: event.start_dt)
+            )
             assert current_event.name == "Shake Your 魂, Baby!!"
             assert current_event.song is not None
             assert current_event.member_bonuses and current_event.support_bonuses

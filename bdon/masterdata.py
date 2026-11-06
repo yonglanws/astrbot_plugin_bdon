@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -18,6 +19,8 @@ from .assets import is_public_http_url
 from .constants import (
     ALL_TABLES,
     DEFAULT_DATA_SOURCES,
+    LEGACY_DATA_SOURCES,
+    MASTERDATA_REF,
     REGIONS,
     REQUIRED_TABLES,
     SCRIPT_TEXT_FIELDS,
@@ -26,9 +29,41 @@ from .models import Dataset, DatasetBuilder
 
 logger = logging.getLogger("astrbot")
 
+_GITHUB_API_HOST = "api.github.com"
+
 
 class MasterDataError(RuntimeError):
     pass
+
+
+def is_github_api_source(source: str) -> bool:
+    """Whether ``source`` is a GitHub repository addressed through the REST API."""
+    parsed = urlparse(source)
+    return parsed.scheme == "https" and (parsed.hostname or "") == _GITHUB_API_HOST
+
+
+def source_request(source: str, path: str) -> tuple[str, dict[str, str]]:
+    """Builds the URL and extra headers for one file on one configured source.
+
+    A GitHub API source (``https://api.github.com/repos/owner/repo``) goes
+    through its contents endpoint; the raw media type returns the file bytes
+    instead of the base64 JSON envelope, so large tables work the same way as
+    on raw.githubusercontent. Any other source is a plain base URL.
+    """
+    if is_github_api_source(source):
+        parsed = urlparse(source)
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 3 and parts[0] == "repos":
+            repo = "/".join(parts[:3])
+            query = parsed.query or f"ref={MASTERDATA_REF}"
+            return (
+                f"https://api.github.com/{repo}/contents/{path}?{query}",
+                {
+                    "Accept": "application/vnd.github.raw",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+    return f"{source}/{path}", {}
 
 
 def _read_json(path: Path) -> Any:
@@ -54,8 +89,14 @@ class MasterDataManager:
     ) -> None:
         self.data_dir = Path(data_dir)
         self.asset_base = asset_base
-        self.sources = [source.rstrip("/") for source in (sources or DEFAULT_DATA_SOURCES)]
+        self.sources = self._normalize_sources(sources)
         self.timeout = max(10, int(timeout))
+        # The unauthenticated GitHub API allows 60 requests an hour while a
+        # first sync of every server needs more, so once the quota is spent the
+        # direct raw mirror takes over until GitHub's reset time; sending
+        # requests that are certain to 403 would only slow the sync down.
+        self._api_blocked_until = 0.0
+        self._api_quota_warned = False
         # Keyed by (server key, script): cn and tw/hk read the same files but
         # build separate text variants, so both can be cached at once.
         self._datasets: dict[tuple[str, str], Dataset] = {}
@@ -66,6 +107,21 @@ class MasterDataManager:
         # Coalesces the manifest fetch when several regions sync in parallel.
         self._version_lock = asyncio.Lock()
         self._version_cache: tuple[float, dict[str, Any]] | None = None
+
+    @staticmethod
+    def _normalize_sources(sources: Iterable[str] | None) -> list[str]:
+        cleaned = [
+            str(source).strip().rstrip("/")
+            for source in (sources or ())
+            if str(source).strip()
+        ]
+        if not cleaned:
+            return list(DEFAULT_DATA_SOURCES)
+        # An untouched default list from an earlier release is upgraded in
+        # place; a custom list is kept exactly as the administrator wrote it.
+        if tuple(cleaned) == LEGACY_DATA_SOURCES:
+            return list(DEFAULT_DATA_SOURCES)
+        return cleaned
 
     # -- paths -----------------------------------------------------------------
     def region_dir(self, region: str) -> Path:
@@ -333,8 +389,8 @@ class MasterDataManager:
                     payload: dict[str, Any] = {}
                     for source in self.sources:
                         try:
-                            data = await self._fetch_bytes(
-                                f"{source}/current_version.json"
+                            data = await self._fetch_source(
+                                source, "current_version.json"
                             )
                             payload = json.loads(data.decode("utf-8"))
                             break
@@ -354,24 +410,69 @@ class MasterDataManager:
     async def _download_table(self, data_region: str, table: str) -> Any:
         errors = []
         for source in self.sources:
-            url = f"{source}/{data_region}/{table}.json"
             try:
-                data = await self._fetch_bytes(url)
+                data = await self._fetch_source(
+                    source, f"{data_region}/{table}.json"
+                )
                 return json.loads(data.decode("utf-8"))
             except Exception as exc:  # noqa: BLE001 - try the next mirror
                 errors.append(f"{source}: {exc}")
         raise MasterDataError("; ".join(errors[-2:]) or "no source available")
 
-    async def _fetch_bytes(self, url: str) -> bytes:
+    async def _fetch_source(self, source: str, path: str) -> bytes:
+        url, headers = source_request(source, path)
+        if is_github_api_source(source) and time.time() < self._api_blocked_until:
+            raise MasterDataError("GitHub API 配额已用尽")
+        return await self._fetch_bytes(url, headers)
+
+    def _block_github_api(self, seconds: float) -> None:
+        self._api_blocked_until = max(
+            self._api_blocked_until, time.time() + max(1.0, seconds)
+        )
+        if not self._api_quota_warned:
+            self._api_quota_warned = True
+            logger.info(
+                "[bdon] GitHub API unavailable; falling back to the raw mirror"
+            )
+
+    def _note_github_quota(self, url: str, response: aiohttp.ClientResponse) -> None:
+        """Remembers when the GitHub API quota runs out so later files skip it."""
+        if not is_github_api_source(url):
+            return
+        try:
+            remaining = int(response.headers.get("x-ratelimit-remaining", "1"))
+        except (TypeError, ValueError):
+            return
+        if remaining > 0:
+            return
+        try:
+            reset_at = float(response.headers.get("x-ratelimit-reset", "0"))
+        except (TypeError, ValueError):
+            reset_at = 0.0
+        self._block_github_api(
+            reset_at - time.time() if reset_at > time.time() else 60.0
+        )
+
+    async def _fetch_bytes(
+        self, url: str, extra_headers: dict[str, str] | None = None
+    ) -> bytes:
         if not is_public_http_url(url):
             raise MasterDataError(f"拒绝非公网数据源：{url}")
         headers = {
             "User-Agent": "astrbot-plugin-bdon/1.0 (+https://github.com/StarMoe-org/moenotes)",
             "Accept": "application/json,*/*",
         }
+        if extra_headers:
+            headers.update(extra_headers)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.get(url) as response:
+                self._note_github_quota(url, response)
                 if response.status != 200:
+                    if is_github_api_source(url) and response.status in {403, 429}:
+                        # Secondary rate limits carry no useful reset header;
+                        # pause the API briefly instead of retrying per table.
+                        self._block_github_api(60.0)
+                        raise MasterDataError(f"GitHub API 限流 (HTTP {response.status})")
                     raise MasterDataError(f"HTTP {response.status}")
                 return await response.read()
